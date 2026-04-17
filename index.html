@@ -26,57 +26,29 @@
           <button class="tool-button secondary" id="undoButton" type="button">Undo</button>
           <button class="tool-button secondary" id="rollAllButton" type="button">Roll All</button>
         </div>
+
+        <div class="pdf-controls">
+          <label class="file-button" for="pdfInput">Load PDF</label>
+          <input id="pdfInput" type="file" accept="application/pdf" />
+
+          <button class="zoom-button" id="zoomOutButton" type="button">-</button>
+          <div class="zoom-label" id="zoomLabel">100%</div>
+          <button class="zoom-button" id="zoomInButton" type="button">+</button>
+        </div>
       </header>
 
-      <main class="bottom-panel">
-        <div class="board-note">
-          Testing preview sheet. This version is static and GitHub Pages friendly.
+      <main class="bottom-panel" id="bottomPanel">
+        <div class="pdf-note" id="pdfNote">
+          Load a PDF to begin. The toolbar stays pinned at the top while the PDF scrolls below.
         </div>
 
-        <div class="sheet-card">
-          <div class="board-wrap">
-            <div class="board" id="board">
-              <svg
-                class="sheet-svg"
-                viewBox="0 0 900 1300"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-              >
-                <rect x="0" y="0" width="900" height="1300" fill="white"></rect>
-
-                <text x="450" y="74" text-anchor="middle" class="sheet-title">
-                  Sample Roll-and-Write Sheet
-                </text>
-
-                <g class="sheet-grid">
-                  <!-- dice boxes -->
-                  <rect x="70" y="120" width="95" height="95" rx="14"></rect>
-                  <rect x="195" y="120" width="95" height="95" rx="14"></rect>
-                  <rect x="320" y="120" width="95" height="95" rx="14"></rect>
-                  <rect x="445" y="120" width="95" height="95" rx="14"></rect>
-                  <rect x="570" y="120" width="95" height="95" rx="14"></rect>
-                  <rect x="695" y="120" width="95" height="95" rx="14"></rect>
-
-                  <!-- circles grid -->
-                  <g>
-                    <script type="application/json" id="gridData">
-                      {"rows":10,"cols":6,"startX":70,"startY":280,"stepX":125,"stepY":85,"size":60}
-                    </script>
-                  </g>
-                </g>
-
-                <text x="70" y="255" class="sheet-help">
-                  Use this sample page to test dots, numbers, circles, and X marks.
-                </text>
-                <text x="70" y="1110" class="sheet-help">
-                  Once you like the look, this can be swapped to the real PDF version.
-                </text>
-                <text x="70" y="1145" class="sheet-help">
-                  The deployed app keeps local progress on this device.
-                </text>
-              </svg>
-
-              <div class="annotation-layer" id="annotationLayer"></div>
+        <div class="pdf-viewer" id="pdfViewer">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-card">
+              <div class="empty-title">No PDF loaded yet</div>
+              <div class="empty-text">
+                Tap <strong>Load PDF</strong> above, choose a PDF from your phone, then tap the pages to place marks.
+              </div>
             </div>
           </div>
         </div>
@@ -94,6 +66,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
