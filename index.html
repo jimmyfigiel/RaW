@@ -1,102 +1,97 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#f3f3f3" />
-  <link rel="manifest" href="manifest.json" />
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
-  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
-  <link rel="apple-touch-icon" href="icon-192.png" />
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <meta name="theme-color" content="#e5e7eb" />
   <title>Roll and Write PWA</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app">
-    <header class="top-panel">
-      <div class="dice-row" id="diceRow"></div>
-      <div class="tool-row">
-        <button id="toolNumber" class="tool-button">123</button>
-        <button id="toolDot" class="tool-button active">Dot</button>
-        <button id="toolCircle" class="tool-button">O/X</button>
-        <button id="undoButton" class="tool-button">Undo</button>
-        <button id="rollButton" class="tool-button">Roll</button>
-      </div>
-      <div class="status-bar">
-        <span id="statusText">Tool: Dot</span>
-        <button id="installButton" class="secondary-button hidden">Install</button>
-      </div>
-    </header>
+  <div class="app-shell">
+    <div class="app-frame">
+      <header class="top-panel">
+        <div class="dice-row" id="diceRow"></div>
 
-    <main class="board-panel">
-      <div class="board-wrapper">
-        <div id="board" class="board" aria-label="Sample roll-and-write board">
-          <svg class="board-art" viewBox="0 0 900 1300" preserveAspectRatio="none" aria-hidden="true">
-            <rect x="0" y="0" width="900" height="1300" fill="white"></rect>
-            <text x="450" y="70" text-anchor="middle" font-size="34" font-weight="700" fill="#111">Sample Roll-and-Write Sheet</text>
-
-            <g stroke="#bdbdbd" stroke-width="2" fill="none">
-              <rect x="70" y="120" width="95" height="95" rx="14"></rect>
-              <rect x="195" y="120" width="95" height="95" rx="14"></rect>
-              <rect x="320" y="120" width="95" height="95" rx="14"></rect>
-              <rect x="445" y="120" width="95" height="95" rx="14"></rect>
-              <rect x="570" y="120" width="95" height="95" rx="14"></rect>
-              <rect x="695" y="120" width="95" height="95" rx="14"></rect>
-            </g>
-
-            <g stroke="#cccccc" stroke-width="2" fill="none">
-              <circle cx="100" cy="320" r="30"></circle>
-              <circle cx="225" cy="320" r="30"></circle>
-              <circle cx="350" cy="320" r="30"></circle>
-              <circle cx="475" cy="320" r="30"></circle>
-              <circle cx="600" cy="320" r="30"></circle>
-              <circle cx="725" cy="320" r="30"></circle>
-
-              <circle cx="100" cy="405" r="30"></circle>
-              <circle cx="225" cy="405" r="30"></circle>
-              <circle cx="350" cy="405" r="30"></circle>
-              <circle cx="475" cy="405" r="30"></circle>
-              <circle cx="600" cy="405" r="30"></circle>
-              <circle cx="725" cy="405" r="30"></circle>
-
-              <circle cx="100" cy="490" r="30"></circle>
-              <circle cx="225" cy="490" r="30"></circle>
-              <circle cx="350" cy="490" r="30"></circle>
-              <circle cx="475" cy="490" r="30"></circle>
-              <circle cx="600" cy="490" r="30"></circle>
-              <circle cx="725" cy="490" r="30"></circle>
-
-              <circle cx="100" cy="575" r="30"></circle>
-              <circle cx="225" cy="575" r="30"></circle>
-              <circle cx="350" cy="575" r="30"></circle>
-              <circle cx="475" cy="575" r="30"></circle>
-              <circle cx="600" cy="575" r="30"></circle>
-              <circle cx="725" cy="575" r="30"></circle>
-
-              <circle cx="100" cy="660" r="30"></circle>
-              <circle cx="225" cy="660" r="30"></circle>
-              <circle cx="350" cy="660" r="30"></circle>
-              <circle cx="475" cy="660" r="30"></circle>
-              <circle cx="600" cy="660" r="30"></circle>
-              <circle cx="725" cy="660" r="30"></circle>
-
-              <circle cx="100" cy="745" r="30"></circle>
-              <circle cx="225" cy="745" r="30"></circle>
-              <circle cx="350" cy="745" r="30"></circle>
-              <circle cx="475" cy="745" r="30"></circle>
-              <circle cx="600" cy="745" r="30"></circle>
-              <circle cx="725" cy="745" r="30"></circle>
-            </g>
-
-            <g fill="#666666" font-size="22" font-weight="600">
-              <text x="70" y="900">Tap to place numbers, red dots, circles, and crossed circles.</text>
-              <text x="70" y="940">This deployable bundle is a static PWA prototype.</text>
-              <text x="70" y="980">Next step later: swap this board for PDF loading and annotation.</text>
-            </g>
-          </svg>
-          <div id="marksLayer" class="marks-layer"></div>
+        <div class="tool-row">
+          <button class="tool-button active" id="toolNumber" type="button">123</button>
+          <button class="tool-button" id="toolDot" type="button">Dot</button>
+          <button class="tool-button" id="toolCircle" type="button">O/X</button>
+          <button class="tool-button secondary" id="undoButton" type="button">Undo</button>
+          <button class="tool-button secondary" id="rollAllButton" type="button">Roll All</button>
         </div>
+      </header>
+
+      <main class="bottom-panel">
+        <div class="board-note">
+          Testing preview sheet. This version is static and GitHub Pages friendly.
+        </div>
+
+        <div class="sheet-card">
+          <div class="board-wrap">
+            <div class="board" id="board">
+              <svg
+                class="sheet-svg"
+                viewBox="0 0 900 1300"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <rect x="0" y="0" width="900" height="1300" fill="white"></rect>
+
+                <text x="450" y="74" text-anchor="middle" class="sheet-title">
+                  Sample Roll-and-Write Sheet
+                </text>
+
+                <g class="sheet-grid">
+                  <!-- dice boxes -->
+                  <rect x="70" y="120" width="95" height="95" rx="14"></rect>
+                  <rect x="195" y="120" width="95" height="95" rx="14"></rect>
+                  <rect x="320" y="120" width="95" height="95" rx="14"></rect>
+                  <rect x="445" y="120" width="95" height="95" rx="14"></rect>
+                  <rect x="570" y="120" width="95" height="95" rx="14"></rect>
+                  <rect x="695" y="120" width="95" height="95" rx="14"></rect>
+
+                  <!-- circles grid -->
+                  <g>
+                    <script type="application/json" id="gridData">
+                      {"rows":10,"cols":6,"startX":70,"startY":280,"stepX":125,"stepY":85,"size":60}
+                    </script>
+                  </g>
+                </g>
+
+                <text x="70" y="255" class="sheet-help">
+                  Use this sample page to test dots, numbers, circles, and X marks.
+                </text>
+                <text x="70" y="1110" class="sheet-help">
+                  Once you like the look, this can be swapped to the real PDF version.
+                </text>
+                <text x="70" y="1145" class="sheet-help">
+                  The deployed app keeps local progress on this device.
+                </text>
+              </svg>
+
+              <div class="annotation-layer" id="annotationLayer"></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="numberPadBackdrop">
+    <div class="number-pad">
+      <div class="number-pad-header">
+        <div class="number-pad-title">Pick a number</div>
+        <button class="close-button" id="closePadButton" type="button">Close</button>
       </div>
-    </main>
+      <div class="number-grid" id="numberGrid"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>
