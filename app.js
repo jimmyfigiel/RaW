@@ -1,13 +1,14 @@
-import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs";
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.min.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
+  "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs";
 
-const STORAGE_KEY = "roll-and-write-pwa-pdf-state-v1";
+const STORAGE_KEY = "roll-and-write-pwa-custom-viewport-v1";
 
 const diceRow = document.getElementById("diceRow");
 const pdfInput = document.getElementById("pdfInput");
-const pdfViewer = document.getElementById("pdfViewer");
+const pdfStage = document.getElementById("pdfStage");
+const pdfViewport = document.getElementById("pdfViewport");
 const pdfNote = document.getElementById("pdfNote");
 const emptyState = document.getElementById("emptyState");
 
@@ -29,15 +30,15 @@ function roll() {
   return Math.floor(Math.random() * 6) + 1;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function makeId() {
   if (window.crypto && window.crypto.randomUUID) {
     return window.crypto.randomUUID();
   }
-  return Date.now() + "-" + Math.random().toString(16).slice(2);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function createInitialState() {
@@ -67,7 +68,7 @@ function loadState() {
       marks: Array.isArray(parsed.marks) ? parsed.marks : [],
       zoom: typeof parsed.zoom === "number" ? parsed.zoom : 1
     };
-  } catch (err) {
+  } catch {
     return createInitialState();
   }
 }
@@ -76,10 +77,30 @@ let state = loadState();
 let pendingPoint = null;
 let pdfDoc = null;
 let currentPdfName = "";
-let currentPdfData = null;
 let renderToken = 0;
 let isRollingAll = false;
 const rollingDiceIds = new Set();
+
+const view = {
+  scale: Math.max(0.5, Math.min(3, state.zoom || 1)),
+  offsetX: 0,
+  offsetY: 0,
+  minScale: 0.5,
+  maxScale: 3,
+  stageWidth: 0,
+  stageHeight: 0,
+  fitScale: 1
+};
+
+const gesture = {
+  pointers: new Map(),
+  mode: "none",
+  startDistance: 0,
+  startScale: 1,
+  startMidWorldX: 0,
+  startMidWorldY: 0,
+  tapCandidate: null
+};
 
 function saveState() {
   localStorage.setItem(
@@ -88,7 +109,7 @@ function saveState() {
       dice: state.dice,
       tool: state.tool,
       marks: state.marks,
-      zoom: state.zoom
+      zoom: view.scale
     })
   );
 }
@@ -100,7 +121,7 @@ function renderToolButtons() {
 }
 
 function renderZoomLabel() {
-  zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+  zoomLabel.textContent = `${Math.round(view.scale * 100)}%`;
 }
 
 function renderDice() {
@@ -118,10 +139,7 @@ function renderDice() {
     face.textContent = String(die.value);
 
     button.appendChild(face);
-    button.addEventListener("click", function () {
-      rerollOneAnimated(die.id);
-    });
-
+    button.addEventListener("click", () => rerollOneAnimated(die.id));
     diceRow.appendChild(button);
   });
 }
@@ -136,15 +154,12 @@ async function animateDieRoll(die) {
 
 async function rerollOneAnimated(dieId) {
   if (isRollingAll || rollingDiceIds.has(dieId)) return;
-
   const die = state.dice.find((item) => item.id === dieId);
   if (!die) return;
 
   rollingDiceIds.add(dieId);
   renderDice();
-
   await animateDieRoll(die);
-
   rollingDiceIds.delete(dieId);
   saveState();
   renderDice();
@@ -200,9 +215,8 @@ function buildNumberPad() {
     button.type = "button";
     button.className = "number-pick";
     button.textContent = value;
-    button.addEventListener("click", function () {
+    button.addEventListener("click", () => {
       if (!pendingPoint) return;
-
       addMark({
         id: makeId(),
         page: pendingPoint.page,
@@ -211,10 +225,8 @@ function buildNumberPad() {
         y: pendingPoint.y,
         value
       });
-
       closeNumberPad();
     });
-
     numberGrid.appendChild(button);
   });
 }
@@ -234,26 +246,16 @@ function findNearbyCircle(pageNumber, x, y) {
     const mark = state.marks[i];
     if (mark.page !== pageNumber) continue;
     if (mark.type !== "circle" && mark.type !== "circlex") continue;
-
     const dx = mark.x - x;
     const dy = mark.y - y;
-
-    if (Math.sqrt(dx * dx + dy * dy) < 0.04) {
-      return i;
-    }
+    if (Math.sqrt(dx * dx + dy * dy) < 0.04) return i;
   }
   return -1;
 }
 
 function placeFromTool(pageNumber, x, y) {
   if (state.tool === "dot") {
-    addMark({
-      id: makeId(),
-      page: pageNumber,
-      type: "dot",
-      x,
-      y
-    });
+    addMark({ id: makeId(), page: pageNumber, type: "dot", x, y });
     return;
   }
 
@@ -271,13 +273,7 @@ function placeFromTool(pageNumber, x, y) {
         rerenderAnnotationsOnly();
       }
     } else {
-      addMark({
-        id: makeId(),
-        page: pageNumber,
-        type: "circle",
-        x,
-        y
-      });
+      addMark({ id: makeId(), page: pageNumber, type: "circle", x, y });
     }
   }
 }
@@ -288,30 +284,24 @@ function createMarkElement(mark) {
   el.style.left = `${mark.x * 100}%`;
   el.style.top = `${mark.y * 100}%`;
 
-  if (mark.type === "dot") {
-    return el;
-  }
+  if (mark.type === "dot") return el;
 
   if (mark.type === "number") {
     el.textContent = mark.value;
     return el;
   }
 
-  if (mark.type === "circle" || mark.type === "circlex") {
-    const ring = document.createElement("div");
-    ring.className = "circle-ring";
-    el.appendChild(ring);
+  const ring = document.createElement("div");
+  ring.className = "circle-ring";
+  el.appendChild(ring);
 
-    if (mark.type === "circlex") {
-      const a = document.createElement("div");
-      a.className = "x-line a";
-      const b = document.createElement("div");
-      b.className = "x-line b";
-      el.appendChild(a);
-      el.appendChild(b);
-    }
-
-    return el;
+  if (mark.type === "circlex") {
+    const a = document.createElement("div");
+    a.className = "x-line a";
+    const b = document.createElement("div");
+    b.className = "x-line b";
+    el.appendChild(a);
+    el.appendChild(b);
   }
 
   return el;
@@ -319,16 +309,13 @@ function createMarkElement(mark) {
 
 function renderAnnotationsForPage(pageNumber, layer) {
   layer.innerHTML = "";
-  const pageMarks = marksForPage(pageNumber);
-
-  pageMarks.forEach((mark) => {
+  marksForPage(pageNumber).forEach((mark) => {
     layer.appendChild(createMarkElement(mark));
   });
 }
 
 function rerenderAnnotationsOnly() {
-  const layers = pdfViewer.querySelectorAll(".annotation-layer");
-  layers.forEach((layer) => {
+  pdfStage.querySelectorAll(".annotation-layer").forEach((layer) => {
     const pageNumber = Number(layer.dataset.page);
     renderAnnotationsForPage(pageNumber, layer);
   });
@@ -341,80 +328,296 @@ function makeLoadingCard(text) {
   return div;
 }
 
-function createPageTapHandlers(pageShell, pageNumber) {
-  const pointerState = {
-    map: {}
+function applyTransform() {
+  pdfStage.style.transform = `translate(${view.offsetX}px, ${view.offsetY}px) scale(${view.scale})`;
+  renderZoomLabel();
+}
+
+function clampOffsets() {
+  const viewportWidth = pdfViewport.clientWidth;
+  const viewportHeight = pdfViewport.clientHeight;
+
+  const scaledWidth = view.stageWidth * view.scale;
+  const scaledHeight = view.stageHeight * view.scale;
+
+  if (scaledWidth <= viewportWidth) {
+    view.offsetX = (viewportWidth - scaledWidth) / 2;
+  } else {
+    const minX = viewportWidth - scaledWidth;
+    if (view.offsetX < minX) view.offsetX = minX;
+    if (view.offsetX > 0) view.offsetX = 0;
+  }
+
+  if (scaledHeight <= viewportHeight) {
+    view.offsetY = (viewportHeight - scaledHeight) / 2;
+  } else {
+    const minY = viewportHeight - scaledHeight;
+    if (view.offsetY < minY) view.offsetY = minY;
+    if (view.offsetY > 0) view.offsetY = 0;
+  }
+}
+
+function worldPointFromScreen(clientX, clientY) {
+  const rect = pdfViewport.getBoundingClientRect();
+  const localX = clientX - rect.left;
+  const localY = clientY - rect.top;
+
+  return {
+    x: (localX - view.offsetX) / view.scale,
+    y: (localY - view.offsetY) / view.scale
   };
+}
 
-  pageShell.addEventListener("pointerdown", (event) => {
-    const isTouch = event.pointerType === "touch";
-    const activeTouches = isTouch ? Object.keys(pointerState.map).length + 1 : 1;
+function screenPointFromWorld(worldX, worldY) {
+  return {
+    x: worldX * view.scale + view.offsetX,
+    y: worldY * view.scale + view.offsetY
+  };
+}
 
-    pointerState.map[event.pointerId] = {
-      startX: event.clientX,
-      startY: event.clientY,
-      moved: false,
-      multiTouch: activeTouches > 1
+function setScaleAroundWorldPoint(nextScale, worldX, worldY, anchorScreenX, anchorScreenY) {
+  view.scale = Math.max(view.minScale, Math.min(view.maxScale, nextScale));
+  view.offsetX = anchorScreenX - worldX * view.scale;
+  view.offsetY = anchorScreenY - worldY * view.scale;
+  clampOffsets();
+  applyTransform();
+  state.zoom = view.scale;
+  saveState();
+}
+
+function fitStageToViewport() {
+  if (!view.stageWidth || !view.stageHeight) return;
+  const viewportWidth = pdfViewport.clientWidth;
+  const viewportHeight = pdfViewport.clientHeight;
+
+  const scaleX = viewportWidth / view.stageWidth;
+  const scaleY = viewportHeight / view.stageHeight;
+
+  view.fitScale = Math.min(scaleX, scaleY, 1);
+  if (!Number.isFinite(view.fitScale) || view.fitScale <= 0) {
+    view.fitScale = 1;
+  }
+
+  if (!pdfDoc) {
+    view.scale = 1;
+  } else if (view.scale < view.minScale || view.scale > view.maxScale) {
+    view.scale = Math.max(view.minScale, Math.min(view.maxScale, view.fitScale));
+  }
+
+  clampOffsets();
+  applyTransform();
+}
+
+function getDistance(a, b) {
+  const dx = a.clientX - b.clientX;
+  const dy = a.clientY - b.clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getMidpoint(a, b) {
+  return {
+    x: (a.clientX + b.clientX) / 2,
+    y: (a.clientY + b.clientY) / 2
+  };
+}
+
+function hitTestPage(worldX, worldY) {
+  const pageShells = Array.from(pdfStage.querySelectorAll(".page-shell"));
+
+  for (let i = 0; i < pageShells.length; i += 1) {
+    const shell = pageShells[i];
+    const left = shell.offsetLeft;
+    const top = shell.offsetTop;
+    const width = shell.offsetWidth;
+    const height = shell.offsetHeight;
+
+    if (
+      worldX >= left &&
+      worldX <= left + width &&
+      worldY >= top &&
+      worldY <= top + height
+    ) {
+      return {
+        page: Number(shell.dataset.page),
+        x: (worldX - left) / width,
+        y: (worldY - top) / height
+      };
+    }
+  }
+
+  return null;
+}
+
+function resetGestureMode() {
+  gesture.mode = "none";
+  gesture.startDistance = 0;
+  gesture.startScale = view.scale;
+  gesture.startMidWorldX = 0;
+  gesture.startMidWorldY = 0;
+  gesture.tapCandidate = null;
+}
+
+function updateGestureMode() {
+  const pointers = Array.from(gesture.pointers.values());
+
+  if (pointers.length >= 2) {
+    const a = pointers[0];
+    const b = pointers[1];
+    const midpoint = getMidpoint(a, b);
+    const midpointWorld = worldPointFromScreen(midpoint.x, midpoint.y);
+
+    gesture.mode = "gesture";
+    gesture.startDistance = getDistance(a, b);
+    gesture.startScale = view.scale;
+    gesture.startMidWorldX = midpointWorld.x;
+    gesture.startMidWorldY = midpointWorld.y;
+    gesture.tapCandidate = null;
+    return;
+  }
+
+  if (pointers.length === 1) {
+    const p = pointers[0];
+    gesture.mode = "tap";
+    gesture.tapCandidate = {
+      pointerId: p.pointerId,
+      startX: p.clientX,
+      startY: p.clientY
     };
+    return;
+  }
 
-    if (activeTouches > 1) {
-      Object.keys(pointerState.map).forEach((key) => {
-        pointerState.map[key].multiTouch = true;
-      });
-    }
+  resetGestureMode();
+}
+
+function handleViewportPointerDown(event) {
+  event.preventDefault();
+  pdfViewport.setPointerCapture(event.pointerId);
+
+  gesture.pointers.set(event.pointerId, {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY
   });
 
-  pageShell.addEventListener("pointermove", (event) => {
-    const tracker = pointerState.map[event.pointerId];
-    if (!tracker) return;
+  updateGestureMode();
+}
 
-    const dx = event.clientX - tracker.startX;
-    const dy = event.clientY - tracker.startY;
+function handleViewportPointerMove(event) {
+  if (!gesture.pointers.has(event.pointerId)) return;
+  event.preventDefault();
 
+  gesture.pointers.set(event.pointerId, {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY
+  });
+
+  const pointers = Array.from(gesture.pointers.values());
+
+  if (pointers.length >= 2) {
+    const a = pointers[0];
+    const b = pointers[1];
+    const midpoint = getMidpoint(a, b);
+    const dist = getDistance(a, b);
+
+    if (!gesture.startDistance) {
+      updateGestureMode();
+      return;
+    }
+
+    const rawScale = gesture.startScale * (dist / gesture.startDistance);
+    const nextScale = Math.max(view.minScale, Math.min(view.maxScale, rawScale));
+
+    const rect = pdfViewport.getBoundingClientRect();
+    const anchorScreenX = midpoint.x - rect.left;
+    const anchorScreenY = midpoint.y - rect.top;
+
+    view.scale = nextScale;
+    view.offsetX = anchorScreenX - gesture.startMidWorldX * view.scale;
+    view.offsetY = anchorScreenY - gesture.startMidWorldY * view.scale;
+
+    clampOffsets();
+    applyTransform();
+    state.zoom = view.scale;
+    saveState();
+    return;
+  }
+
+  if (gesture.mode === "tap" && gesture.tapCandidate) {
+    const dx = event.clientX - gesture.tapCandidate.startX;
+    const dy = event.clientY - gesture.tapCandidate.startY;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-      tracker.moved = true;
+      gesture.mode = "moved";
+      gesture.tapCandidate = null;
     }
-  });
+  }
+}
 
-  pageShell.addEventListener("pointerup", (event) => {
-    const tracker = pointerState.map[event.pointerId];
-    if (!tracker) return;
+function handleViewportPointerUp(event) {
+  if (!gesture.pointers.has(event.pointerId)) return;
+  event.preventDefault();
 
-    const shouldPlace = !tracker.moved && !tracker.multiTouch;
-    delete pointerState.map[event.pointerId];
+  const hadTapCandidate =
+    gesture.mode === "tap" &&
+    gesture.tapCandidate &&
+    gesture.tapCandidate.pointerId === event.pointerId;
 
-    if (!shouldPlace) return;
+  if (hadTapCandidate) {
+    const world = worldPointFromScreen(event.clientX, event.clientY);
+    const hit = hitTestPage(world.x, world.y);
+    if (hit) {
+      placeFromTool(hit.page, hit.x, hit.y);
+    }
+  }
 
-    const rect = pageShell.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  gesture.pointers.delete(event.pointerId);
 
-    placeFromTool(pageNumber, x, y);
-  });
+  if (gesture.pointers.size > 0) {
+    updateGestureMode();
+  } else {
+    resetGestureMode();
+  }
+}
 
-  pageShell.addEventListener("pointercancel", (event) => {
-    delete pointerState.map[event.pointerId];
-  });
+function handleViewportPointerCancel(event) {
+  gesture.pointers.delete(event.pointerId);
+  if (gesture.pointers.size > 0) {
+    updateGestureMode();
+  } else {
+    resetGestureMode();
+  }
 }
 
 async function renderPdf() {
   if (!pdfDoc) return;
 
   const myToken = ++renderToken;
-  pdfViewer.innerHTML = "";
-  pdfViewer.appendChild(makeLoadingCard("Rendering PDF..."));
-  if (emptyState) emptyState.style.display = "none";
+  pdfStage.innerHTML = "";
+  pdfStage.appendChild(makeLoadingCard("Rendering PDF..."));
+  emptyState.style.display = "none";
 
-  const nextViewer = document.createElement("div");
+  const stageContent = document.createElement("div");
+  stageContent.style.width = "760px";
+  stageContent.style.maxWidth = "760px";
+
+  const viewportWidth = Math.max(320, Math.min(760, pdfViewport.clientWidth - 20));
+
+  let yCursor = 0;
+  let maxWidth = 0;
 
   for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
     if (myToken !== renderToken) return;
 
     const page = await pdfDoc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: state.zoom });
+    const rawViewport = page.getViewport({ scale: 1 });
+    const fitWidth = viewportWidth - 20;
+    const baseScale = fitWidth / rawViewport.width;
+    const displayWidth = rawViewport.width * baseScale;
+    const displayHeight = rawViewport.height * baseScale;
 
     const pageCard = document.createElement("div");
     pageCard.className = "page-card";
+    pageCard.style.width = `${viewportWidth}px`;
 
     const meta = document.createElement("div");
     meta.className = "page-meta";
@@ -423,65 +626,96 @@ async function renderPdf() {
 
     const pageShell = document.createElement("div");
     pageShell.className = "page-shell";
-    pageShell.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
+    pageShell.dataset.page = String(pageNumber);
+    pageShell.style.width = `${displayWidth}px`;
+    pageShell.style.height = `${displayHeight}px`;
 
     const canvas = document.createElement("canvas");
     canvas.className = "page-canvas";
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(displayWidth * dpr);
+    canvas.height = Math.floor(displayHeight * dpr);
+    canvas.style.width = `${displayWidth}px`;
+    canvas.style.height = `${displayHeight}px`;
 
     const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     await page.render({
       canvasContext: ctx,
-      viewport
+      viewport: page.getViewport({ scale: baseScale })
     }).promise;
 
     const annotationLayer = document.createElement("div");
     annotationLayer.className = "annotation-layer";
     annotationLayer.dataset.page = String(pageNumber);
-
     renderAnnotationsForPage(pageNumber, annotationLayer);
 
     pageShell.appendChild(canvas);
     pageShell.appendChild(annotationLayer);
-    createPageTapHandlers(pageShell, pageNumber);
-
     pageCard.appendChild(pageShell);
-    nextViewer.appendChild(pageCard);
+    stageContent.appendChild(pageCard);
+
+    yCursor += pageCard.offsetHeight + 16;
+    maxWidth = Math.max(maxWidth, viewportWidth);
   }
 
   if (myToken !== renderToken) return;
 
-  pdfViewer.innerHTML = "";
-  pdfViewer.appendChild(nextViewer);
+  pdfStage.innerHTML = "";
+  pdfStage.appendChild(stageContent);
+
+  const rect = stageContent.getBoundingClientRect();
+  view.stageWidth = rect.width;
+  view.stageHeight = rect.height;
+
+  view.minScale = Math.min(1, Math.max(0.35, pdfViewport.clientWidth / Math.max(1, view.stageWidth)));
+  if (view.scale < view.minScale) view.scale = view.minScale;
+
+  clampOffsets();
+  applyTransform();
 
   pdfNote.textContent = currentPdfName
-    ? `${currentPdfName} loaded. Scroll through pages below. Tap to place marks.`
-    : "PDF loaded. Scroll through pages below. Tap to place marks.";
+    ? `${currentPdfName} loaded. One tap places marks. Two fingers pan and zoom inside the PDF area.`
+    : "PDF loaded. One tap places marks. Two fingers pan and zoom inside the PDF area.";
+
+  state.zoom = view.scale;
+  saveState();
 }
 
 async function loadPdfFromArrayBuffer(buffer, fileName) {
-  currentPdfData = buffer;
   currentPdfName = fileName || "PDF";
   const loadingTask = pdfjsLib.getDocument({ data: buffer });
   pdfDoc = await loadingTask.promise;
   await renderPdf();
 }
 
-function updateZoom(nextZoom) {
-  state.zoom = Math.max(0.5, Math.min(3, Number(nextZoom.toFixed(2))));
-  saveState();
-  renderZoomLabel();
+function updateZoom(delta) {
+  const rect = pdfViewport.getBoundingClientRect();
+  const anchorScreenX = rect.width / 2;
+  const anchorScreenY = rect.height / 2;
+  const world = {
+    x: (anchorScreenX - view.offsetX) / view.scale,
+    y: (anchorScreenY - view.offsetY) / view.scale
+  };
+  setScaleAround(delta, world.x, world.y, anchorScreenX, anchorScreenY);
+}
 
-  if (pdfDoc) {
-    renderPdf();
-  }
+function setScaleAround(nextScale, worldX, worldY, anchorScreenX, anchorScreenY) {
+  view.scale = Math.max(view.minScale, Math.min(view.maxScale, Number(nextScale.toFixed(3))));
+  view.offsetX = anchorScreenX - worldX * view.scale;
+  view.offsetY = anchorScreenY - worldY * view.scale;
+  clampOffsets();
+  applyTransform();
+  state.zoom = view.scale;
+  saveState();
 }
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", function () {
-      navigator.serviceWorker.register("./service-worker.js").catch(function () {});
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js").catch(() => {});
     });
   }
 }
@@ -499,13 +733,12 @@ function init() {
   undoButton.addEventListener("click", undo);
   rollAllButton.addEventListener("click", rerollAll);
 
-  zoomOutButton.addEventListener("click", () => updateZoom(state.zoom - 0.1));
-  zoomInButton.addEventListener("click", () => updateZoom(state.zoom + 0.1));
+  zoomOutButton.addEventListener("click", () => updateZoom(view.scale - 0.1));
+  zoomInButton.addEventListener("click", () => updateZoom(view.scale + 0.1));
 
   pdfInput.addEventListener("change", async (event) => {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
-
     const buffer = await file.arrayBuffer();
     await loadPdfFromArrayBuffer(buffer, file.name);
   });
@@ -514,6 +747,17 @@ function init() {
   numberPadBackdrop.addEventListener("click", (event) => {
     if (event.target === numberPadBackdrop) {
       closeNumberPad();
+    }
+  });
+
+  pdfViewport.addEventListener("pointerdown", handleViewportPointerDown, { passive: false });
+  pdfViewport.addEventListener("pointermove", handleViewportPointerMove, { passive: false });
+  pdfViewport.addEventListener("pointerup", handleViewportPointerUp, { passive: false });
+  pdfViewport.addEventListener("pointercancel", handleViewportPointerCancel, { passive: false });
+
+  window.addEventListener("resize", () => {
+    if (pdfDoc) {
+      renderPdf();
     }
   });
 }
