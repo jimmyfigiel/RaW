@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3f3f3" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>Roll and Write PWA</title>
+</head>
+<body>
+  <div id="app">
+    <header class="top-panel">
+      <div class="dice-row" id="diceRow"></div>
+      <div class="tool-row">
+        <button id="toolNumber" class="tool-button">123</button>
+        <button id="toolDot" class="tool-button active">Dot</button>
+        <button id="toolCircle" class="tool-button">O/X</button>
+        <button id="undoButton" class="tool-button">Undo</button>
+        <button id="rollButton" class="tool-button">Roll</button>
+      </div>
+      <div class="status-bar">
+        <span id="statusText">Tool: Dot</span>
+        <button id="installButton" class="secondary-button hidden">Install</button>
+      </div>
+    </header>
+
+    <main class="board-panel">
+      <div class="board-wrapper">
+        <div id="board" class="board" aria-label="Sample roll-and-write board">
+          <svg class="board-art" viewBox="0 0 900 1300" preserveAspectRatio="none" aria-hidden="true">
+            <rect x="0" y="0" width="900" height="1300" fill="white"></rect>
+            <text x="450" y="70" text-anchor="middle" font-size="34" font-weight="700" fill="#111">Sample Roll-and-Write Sheet</text>
+
+            <g stroke="#bdbdbd" stroke-width="2" fill="none">
+              <rect x="70" y="120" width="95" height="95" rx="14"></rect>
+              <rect x="195" y="120" width="95" height="95" rx="14"></rect>
+              <rect x="320" y="120" width="95" height="95" rx="14"></rect>
+              <rect x="445" y="120" width="95" height="95" rx="14"></rect>
+              <rect x="570" y="120" width="95" height="95" rx="14"></rect>
+              <rect x="695" y="120" width="95" height="95" rx="14"></rect>
+            </g>
+
+            <g stroke="#cccccc" stroke-width="2" fill="none">
+              <circle cx="100" cy="320" r="30"></circle>
+              <circle cx="225" cy="320" r="30"></circle>
+              <circle cx="350" cy="320" r="30"></circle>
+              <circle cx="475" cy="320" r="30"></circle>
+              <circle cx="600" cy="320" r="30"></circle>
+              <circle cx="725" cy="320" r="30"></circle>
+
+              <circle cx="100" cy="405" r="30"></circle>
+              <circle cx="225" cy="405" r="30"></circle>
+              <circle cx="350" cy="405" r="30"></circle>
+              <circle cx="475" cy="405" r="30"></circle>
+              <circle cx="600" cy="405" r="30"></circle>
+              <circle cx="725" cy="405" r="30"></circle>
+
+              <circle cx="100" cy="490" r="30"></circle>
+              <circle cx="225" cy="490" r="30"></circle>
+              <circle cx="350" cy="490" r="30"></circle>
+              <circle cx="475" cy="490" r="30"></circle>
+              <circle cx="600" cy="490" r="30"></circle>
+              <circle cx="725" cy="490" r="30"></circle>
+
+              <circle cx="100" cy="575" r="30"></circle>
+              <circle cx="225" cy="575" r="30"></circle>
+              <circle cx="350" cy="575" r="30"></circle>
+              <circle cx="475" cy="575" r="30"></circle>
+              <circle cx="600" cy="575" r="30"></circle>
+              <circle cx="725" cy="575" r="30"></circle>
+
+              <circle cx="100" cy="660" r="30"></circle>
+              <circle cx="225" cy="660" r="30"></circle>
+              <circle cx="350" cy="660" r="30"></circle>
+              <circle cx="475" cy="660" r="30"></circle>
+              <circle cx="600" cy="660" r="30"></circle>
+              <circle cx="725" cy="660" r="30"></circle>
+
+              <circle cx="100" cy="745" r="30"></circle>
+              <circle cx="225" cy="745" r="30"></circle>
+              <circle cx="350" cy="745" r="30"></circle>
+              <circle cx="475" cy="745" r="30"></circle>
+              <circle cx="600" cy="745" r="30"></circle>
+              <circle cx="725" cy="745" r="30"></circle>
+            </g>
+
+            <g fill="#666666" font-size="22" font-weight="600">
+              <text x="70" y="900">Tap to place numbers, red dots, circles, and crossed circles.</text>
+              <text x="70" y="940">This deployable bundle is a static PWA prototype.</text>
+              <text x="70" y="980">Next step later: swap this board for PDF loading and annotation.</text>
+            </g>
+          </svg>
+          <div id="marksLayer" class="marks-layer"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
