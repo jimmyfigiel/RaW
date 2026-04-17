@@ -1,326 +1,492 @@
-(function () {
-  const STORAGE_KEY = "roll-and-write-pwa-state-v2";
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs";
 
-  const diceRow = document.getElementById("diceRow");
-  const annotationLayer = document.getElementById("annotationLayer");
-  const board = document.getElementById("board");
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
 
-  const toolNumber = document.getElementById("toolNumber");
-  const toolDot = document.getElementById("toolDot");
-  const toolCircle = document.getElementById("toolCircle");
-  const undoButton = document.getElementById("undoButton");
-  const rollAllButton = document.getElementById("rollAllButton");
+const STORAGE_KEY = "roll-and-write-pwa-pdf-state-v1";
 
-  const numberPadBackdrop = document.getElementById("numberPadBackdrop");
-  const closePadButton = document.getElementById("closePadButton");
-  const numberGrid = document.getElementById("numberGrid");
+const diceRow = document.getElementById("diceRow");
+const pdfInput = document.getElementById("pdfInput");
+const pdfViewer = document.getElementById("pdfViewer");
+const pdfNote = document.getElementById("pdfNote");
+const emptyState = document.getElementById("emptyState");
 
-  function roll() {
-    return Math.floor(Math.random() * 6) + 1;
+const toolNumber = document.getElementById("toolNumber");
+const toolDot = document.getElementById("toolDot");
+const toolCircle = document.getElementById("toolCircle");
+const undoButton = document.getElementById("undoButton");
+const rollAllButton = document.getElementById("rollAllButton");
+
+const zoomOutButton = document.getElementById("zoomOutButton");
+const zoomInButton = document.getElementById("zoomInButton");
+const zoomLabel = document.getElementById("zoomLabel");
+
+const numberPadBackdrop = document.getElementById("numberPadBackdrop");
+const closePadButton = document.getElementById("closePadButton");
+const numberGrid = document.getElementById("numberGrid");
+
+function roll() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+function makeId() {
+  if (window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
   }
+  return Date.now() + "-" + Math.random().toString(16).slice(2);
+}
 
-  function makeId() {
-    if (window.crypto && window.crypto.randomUUID) {
-      return window.crypto.randomUUID();
-    }
-    return Date.now() + "-" + Math.random().toString(16).slice(2);
-  }
+function createInitialState() {
+  return {
+    dice: [
+      { id: "w1", color: "white", value: roll() },
+      { id: "w2", color: "white", value: roll() },
+      { id: "w3", color: "white", value: roll() },
+      { id: "b1", color: "black", value: roll() },
+      { id: "b2", color: "black", value: roll() },
+      { id: "b3", color: "black", value: roll() }
+    ],
+    tool: "number",
+    marks: [],
+    zoom: 1
+  };
+}
 
-  function createInitialState() {
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return createInitialState();
+    const parsed = JSON.parse(raw);
     return {
-      dice: [
-        { id: "w1", color: "white", value: roll() },
-        { id: "w2", color: "white", value: roll() },
-        { id: "w3", color: "white", value: roll() },
-        { id: "b1", color: "black", value: roll() },
-        { id: "b2", color: "black", value: roll() },
-        { id: "b3", color: "black", value: roll() }
-      ],
-      tool: "number",
-      marks: []
+      dice: Array.isArray(parsed.dice) ? parsed.dice : createInitialState().dice,
+      tool: parsed.tool || "number",
+      marks: Array.isArray(parsed.marks) ? parsed.marks : [],
+      zoom: typeof parsed.zoom === "number" ? parsed.zoom : 1
     };
+  } catch (err) {
+    return createInitialState();
   }
+}
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return createInitialState();
-      const parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.dice) || !Array.isArray(parsed.marks)) {
-        return createInitialState();
-      }
-      return {
-        dice: parsed.dice,
-        tool: parsed.tool || "number",
-        marks: parsed.marks
-      };
-    } catch (err) {
-      return createInitialState();
-    }
-  }
+let state = loadState();
+let pendingPoint = null;
+let pdfDoc = null;
+let currentPdfName = "";
+let currentPdfData = null;
+let renderToken = 0;
 
-  let state = loadState();
-  let pendingPoint = null;
+function saveState() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      dice: state.dice,
+      tool: state.tool,
+      marks: state.marks,
+      zoom: state.zoom
+    })
+  );
+}
 
-  function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
+function renderToolButtons() {
+  toolNumber.classList.toggle("active", state.tool === "number");
+  toolDot.classList.toggle("active", state.tool === "dot");
+  toolCircle.classList.toggle("active", state.tool === "circle");
+}
 
-  function setTool(nextTool) {
-    state.tool = nextTool;
-    renderToolButtons();
-    saveState();
-  }
+function renderZoomLabel() {
+  zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+}
 
-  function renderToolButtons() {
-    toolNumber.classList.toggle("active", state.tool === "number");
-    toolDot.classList.toggle("active", state.tool === "dot");
-    toolCircle.classList.toggle("active", state.tool === "circle");
-  }
+function renderDice() {
+  diceRow.innerHTML = "";
 
-  function renderDice() {
-    diceRow.innerHTML = "";
+  state.dice.forEach((die, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "die-button";
+    button.setAttribute("aria-label", `Reroll die ${index + 1}`);
 
-    state.dice.forEach((die, index) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "die-button";
-      button.setAttribute("aria-label", "Reroll die " + (index + 1));
+    const face = document.createElement("div");
+    face.className = `die-face ${die.color}`;
+    face.textContent = String(die.value);
 
-      const face = document.createElement("div");
-      face.className = "die-face " + die.color;
-      face.textContent = String(die.value);
-
-      button.appendChild(face);
-      button.addEventListener("click", function () {
-        die.value = roll();
-        saveState();
-        renderDice();
-      });
-
-      diceRow.appendChild(button);
+    button.appendChild(face);
+    button.addEventListener("click", function () {
+      die.value = roll();
+      saveState();
+      renderDice();
     });
-  }
 
-  function renderMarks() {
-    annotationLayer.innerHTML = "";
+    diceRow.appendChild(button);
+  });
+}
 
-    state.marks.forEach((mark) => {
-      const el = document.createElement("div");
-      el.className = "mark " + mark.type;
-      el.style.left = (mark.x * 100) + "%";
-      el.style.top = (mark.y * 100) + "%";
+function rerollAll() {
+  state.dice = state.dice.map((die) => ({
+    id: die.id,
+    color: die.color,
+    value: roll()
+  }));
+  saveState();
+  renderDice();
+}
 
-      if (mark.type === "dot") {
-        annotationLayer.appendChild(el);
-        return;
-      }
+function undo() {
+  state.marks = state.marks.slice(0, -1);
+  saveState();
+  rerenderAnnotationsOnly();
+}
 
-      if (mark.type === "number") {
-        el.textContent = mark.value;
-        annotationLayer.appendChild(el);
-        return;
-      }
+function setTool(nextTool) {
+  state.tool = nextTool;
+  saveState();
+  renderToolButtons();
+}
 
-      if (mark.type === "circle" || mark.type === "circlex") {
-        const ring = document.createElement("div");
-        ring.className = "circle-ring";
-        el.appendChild(ring);
+function openNumberPad(page, x, y) {
+  pendingPoint = { page, x, y };
+  numberPadBackdrop.classList.remove("hidden");
+}
 
-        if (mark.type === "circlex") {
-          const a = document.createElement("div");
-          a.className = "x-line a";
-          const b = document.createElement("div");
-          b.className = "x-line b";
-          el.appendChild(a);
-          el.appendChild(b);
-        }
+function closeNumberPad() {
+  pendingPoint = null;
+  numberPadBackdrop.classList.add("hidden");
+}
 
-        annotationLayer.appendChild(el);
-      }
-    });
-  }
+function buildNumberPad() {
+  const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+  numberGrid.innerHTML = "";
 
-  function renderSheetGrid() {
-    const svg = document.querySelector(".sheet-svg");
-    const gridDataEl = document.getElementById("gridData");
-    if (!svg || !gridDataEl) return;
+  values.forEach((value) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "number-pick";
+    button.textContent = value;
+    button.addEventListener("click", function () {
+      if (!pendingPoint) return;
 
-    let cfg;
-    try {
-      cfg = JSON.parse(gridDataEl.textContent);
-    } catch (e) {
-      return;
-    }
-
-    for (let r = 0; r < cfg.rows; r += 1) {
-      for (let c = 0; c < cfg.cols; c += 1) {
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        const x = cfg.startX + c * cfg.stepX + cfg.size / 2;
-        const y = cfg.startY + r * cfg.stepY + cfg.size / 2;
-        circle.setAttribute("cx", String(x));
-        circle.setAttribute("cy", String(y));
-        circle.setAttribute("r", String(cfg.size / 2));
-        circle.setAttribute("class", "sheet-circle");
-        circle.setAttribute("fill", "none");
-        circle.setAttribute("stroke", "#c4c8cf");
-        circle.setAttribute("stroke-width", "2");
-        svg.appendChild(circle);
-      }
-    }
-  }
-
-  function rerollAll() {
-    state.dice = state.dice.map((die) => ({
-      id: die.id,
-      color: die.color,
-      value: roll()
-    }));
-    saveState();
-    renderDice();
-  }
-
-  function undo() {
-    state.marks = state.marks.slice(0, -1);
-    saveState();
-    renderMarks();
-  }
-
-  function addMark(mark) {
-    state.marks.push(mark);
-    saveState();
-    renderMarks();
-  }
-
-  function findNearbyCircle(x, y) {
-    for (let i = state.marks.length - 1; i >= 0; i -= 1) {
-      const mark = state.marks[i];
-      if (mark.type !== "circle" && mark.type !== "circlex") continue;
-
-      const dx = mark.x - x;
-      const dy = mark.y - y;
-
-      if (Math.sqrt(dx * dx + dy * dy) < 0.04) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  function openNumberPad(x, y) {
-    pendingPoint = { x, y };
-    numberPadBackdrop.classList.remove("hidden");
-  }
-
-  function closeNumberPad() {
-    pendingPoint = null;
-    numberPadBackdrop.classList.add("hidden");
-  }
-
-  function placeFromTool(x, y) {
-    if (state.tool === "dot") {
       addMark({
         id: makeId(),
-        type: "dot",
+        page: pendingPoint.page,
+        type: "number",
+        x: pendingPoint.x,
+        y: pendingPoint.y,
+        value
+      });
+
+      closeNumberPad();
+    });
+
+    numberGrid.appendChild(button);
+  });
+}
+
+function addMark(mark) {
+  state.marks.push(mark);
+  saveState();
+  rerenderAnnotationsOnly();
+}
+
+function marksForPage(pageNumber) {
+  return state.marks.filter((mark) => mark.page === pageNumber);
+}
+
+function findNearbyCircle(pageNumber, x, y) {
+  for (let i = state.marks.length - 1; i >= 0; i -= 1) {
+    const mark = state.marks[i];
+    if (mark.page !== pageNumber) continue;
+    if (mark.type !== "circle" && mark.type !== "circlex") continue;
+
+    const dx = mark.x - x;
+    const dy = mark.y - y;
+
+    if (Math.sqrt(dx * dx + dy * dy) < 0.04) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function placeFromTool(pageNumber, x, y) {
+  if (state.tool === "dot") {
+    addMark({
+      id: makeId(),
+      page: pageNumber,
+      type: "dot",
+      x,
+      y
+    });
+    return;
+  }
+
+  if (state.tool === "number") {
+    openNumberPad(pageNumber, x, y);
+    return;
+  }
+
+  if (state.tool === "circle") {
+    const idx = findNearbyCircle(pageNumber, x, y);
+    if (idx !== -1) {
+      if (state.marks[idx].type === "circle") {
+        state.marks[idx].type = "circlex";
+        saveState();
+        rerenderAnnotationsOnly();
+      }
+    } else {
+      addMark({
+        id: makeId(),
+        page: pageNumber,
+        type: "circle",
         x,
         y
       });
-      return;
-    }
-
-    if (state.tool === "number") {
-      openNumberPad(x, y);
-      return;
-    }
-
-    if (state.tool === "circle") {
-      const idx = findNearbyCircle(x, y);
-      if (idx !== -1) {
-        if (state.marks[idx].type === "circle") {
-          state.marks[idx].type = "circlex";
-          saveState();
-          renderMarks();
-        }
-      } else {
-        addMark({
-          id: makeId(),
-          type: "circle",
-          x,
-          y
-        });
-      }
     }
   }
+}
 
-  function handleBoardClick(event) {
-    const rect = board.getBoundingClientRect();
+function createMarkElement(mark) {
+  const el = document.createElement("div");
+  el.className = `mark ${mark.type}`;
+  el.style.left = `${mark.x * 100}%`;
+  el.style.top = `${mark.y * 100}%`;
+
+  if (mark.type === "dot") {
+    return el;
+  }
+
+  if (mark.type === "number") {
+    el.textContent = mark.value;
+    return el;
+  }
+
+  if (mark.type === "circle" || mark.type === "circlex") {
+    const ring = document.createElement("div");
+    ring.className = "circle-ring";
+    el.appendChild(ring);
+
+    if (mark.type === "circlex") {
+      const a = document.createElement("div");
+      a.className = "x-line a";
+      const b = document.createElement("div");
+      b.className = "x-line b";
+      el.appendChild(a);
+      el.appendChild(b);
+    }
+
+    return el;
+  }
+
+  return el;
+}
+
+function renderAnnotationsForPage(pageNumber, layer) {
+  layer.innerHTML = "";
+  const pageMarks = marksForPage(pageNumber);
+
+  pageMarks.forEach((mark) => {
+    layer.appendChild(createMarkElement(mark));
+  });
+}
+
+function rerenderAnnotationsOnly() {
+  const layers = pdfViewer.querySelectorAll(".annotation-layer");
+  layers.forEach((layer) => {
+    const pageNumber = Number(layer.dataset.page);
+    renderAnnotationsForPage(pageNumber, layer);
+  });
+}
+
+function makeLoadingCard(text) {
+  const div = document.createElement("div");
+  div.className = "loading-card";
+  div.textContent = text;
+  return div;
+}
+
+function createPageTapHandlers(pageShell, pageNumber) {
+  const pointerState = {
+    map: {}
+  };
+
+  pageShell.addEventListener("pointerdown", (event) => {
+    const isTouch = event.pointerType === "touch";
+    const activeTouches = isTouch ? Object.keys(pointerState.map).length + 1 : 1;
+
+    pointerState.map[event.pointerId] = {
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      multiTouch: activeTouches > 1
+    };
+
+    if (activeTouches > 1) {
+      Object.keys(pointerState.map).forEach((key) => {
+        pointerState.map[key].multiTouch = true;
+      });
+    }
+  });
+
+  pageShell.addEventListener("pointermove", (event) => {
+    const tracker = pointerState.map[event.pointerId];
+    if (!tracker) return;
+
+    const dx = event.clientX - tracker.startX;
+    const dy = event.clientY - tracker.startY;
+
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      tracker.moved = true;
+    }
+  });
+
+  pageShell.addEventListener("pointerup", (event) => {
+    const tracker = pointerState.map[event.pointerId];
+    if (!tracker) return;
+
+    const shouldPlace = !tracker.moved && !tracker.multiTouch;
+    delete pointerState.map[event.pointerId];
+
+    if (!shouldPlace) return;
+
+    const rect = pageShell.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    placeFromTool(x, y);
+
+    placeFromTool(pageNumber, x, y);
+  });
+
+  pageShell.addEventListener("pointercancel", (event) => {
+    delete pointerState.map[event.pointerId];
+  });
+}
+
+async function renderPdf() {
+  if (!pdfDoc) return;
+
+  const myToken = ++renderToken;
+  pdfViewer.innerHTML = "";
+  pdfViewer.appendChild(makeLoadingCard("Rendering PDF..."));
+  emptyState.style.display = "none";
+
+  const nextViewer = document.createElement("div");
+
+  for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
+    if (myToken !== renderToken) return;
+
+    const page = await pdfDoc.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: state.zoom });
+
+    const pageCard = document.createElement("div");
+    pageCard.className = "page-card";
+
+    const meta = document.createElement("div");
+    meta.className = "page-meta";
+    meta.textContent = `Page ${pageNumber} of ${pdfDoc.numPages}`;
+    pageCard.appendChild(meta);
+
+    const pageShell = document.createElement("div");
+    pageShell.className = "page-shell";
+    pageShell.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "page-canvas";
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+
+    const ctx = canvas.getContext("2d");
+    await page.render({
+      canvasContext: ctx,
+      viewport
+    }).promise;
+
+    const annotationLayer = document.createElement("div");
+    annotationLayer.className = "annotation-layer";
+    annotationLayer.dataset.page = String(pageNumber);
+
+    renderAnnotationsForPage(pageNumber, annotationLayer);
+    makeDiceBoxOverlay(pageNumber, annotationLayer);
+
+    pageShell.appendChild(canvas);
+    pageShell.appendChild(annotationLayer);
+    createPageTapHandlers(pageShell, pageNumber);
+
+    pageCard.appendChild(pageShell);
+    nextViewer.appendChild(pageCard);
   }
 
-  function buildNumberPad() {
-    const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
-    numberGrid.innerHTML = "";
+  if (myToken !== renderToken) return;
 
-    values.forEach((value) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "number-pick";
-      button.textContent = value;
-      button.addEventListener("click", function () {
-        if (!pendingPoint) return;
-        addMark({
-          id: makeId(),
-          type: "number",
-          x: pendingPoint.x,
-          y: pendingPoint.y,
-          value
-        });
-        closeNumberPad();
-      });
-      numberGrid.appendChild(button);
+  pdfViewer.innerHTML = "";
+  pdfViewer.appendChild(nextViewer);
+
+  pdfNote.textContent = currentPdfName
+    ? `${currentPdfName} loaded. Scroll through pages below. Tap to place marks.`
+    : "PDF loaded. Scroll through pages below. Tap to place marks.";
+}
+
+function makeDiceBoxOverlay(pageNumber, layer) {
+  if (pageNumber !== 1) return;
+
+  // Optional: show current dice values near the top of the first page.
+  // This is intentionally subtle and only appears if the first page is tapped/used.
+  // Remove this whole function call if you do not want the PDF overlay to reflect dice values.
+}
+
+async function loadPdfFromArrayBuffer(buffer, fileName) {
+  currentPdfData = buffer;
+  currentPdfName = fileName || "PDF";
+  const loadingTask = pdfjsLib.getDocument({ data: buffer });
+  pdfDoc = await loadingTask.promise;
+  await renderPdf();
+}
+
+function updateZoom(nextZoom) {
+  state.zoom = Math.max(0.5, Math.min(3, Number(nextZoom.toFixed(2))));
+  saveState();
+  renderZoomLabel();
+
+  if (pdfDoc) {
+    renderPdf();
+  }
+}
+
+function registerServiceWorker() {
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("./service-worker.js").catch(function () {});
     });
   }
+}
 
-  function registerServiceWorker() {
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", function () {
-        navigator.serviceWorker.register("./service-worker.js").catch(function () {});
-      });
+function init() {
+  renderDice();
+  renderToolButtons();
+  renderZoomLabel();
+  buildNumberPad();
+  registerServiceWorker();
+
+  toolNumber.addEventListener("click", () => setTool("number"));
+  toolDot.addEventListener("click", () => setTool("dot"));
+  toolCircle.addEventListener("click", () => setTool("circle"));
+  undoButton.addEventListener("click", undo);
+  rollAllButton.addEventListener("click", rerollAll);
+
+  zoomOutButton.addEventListener("click", () => updateZoom(state.zoom - 0.1));
+  zoomInButton.addEventListener("click", () => updateZoom(state.zoom + 0.1));
+
+  pdfInput.addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const buffer = await file.arrayBuffer();
+    await loadPdfFromArrayBuffer(buffer, file.name);
+  });
+
+  closePadButton.addEventListener("click", closeNumberPad);
+  numberPadBackdrop.addEventListener("click", (event) => {
+    if (event.target === numberPadBackdrop) {
+      closeNumberPad();
     }
-  }
+  });
+}
 
-  function init() {
-    renderSheetGrid();
-    renderToolButtons();
-    renderDice();
-    renderMarks();
-    buildNumberPad();
-    registerServiceWorker();
-
-    toolNumber.addEventListener("click", function () {
-      setTool("number");
-    });
-
-    toolDot.addEventListener("click", function () {
-      setTool("dot");
-    });
-
-    toolCircle.addEventListener("click", function () {
-      setTool("circle");
-    });
-
-    undoButton.addEventListener("click", undo);
-    rollAllButton.addEventListener("click", rerollAll);
-    board.addEventListener("click", handleBoardClick);
-    closePadButton.addEventListener("click", closeNumberPad);
-    numberPadBackdrop.addEventListener("click", function (event) {
-      if (event.target === numberPadBackdrop) {
-        closeNumberPad();
-      }
-    });
-  }
-
-  init();
-})();
+init();
