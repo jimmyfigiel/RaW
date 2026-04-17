@@ -37,17 +37,23 @@
         </div>
       </header>
 
-      <main class="bottom-panel" id="bottomPanel">
+      <main class="bottom-panel">
         <div class="pdf-note" id="pdfNote">
-          Load a PDF to begin. The toolbar stays pinned at the top while the PDF scrolls below.
+          Load a PDF to begin. Use two fingers inside the PDF area to pan and zoom.
         </div>
 
-        <div class="pdf-viewer" id="pdfViewer">
+        <div class="pdf-viewport" id="pdfViewport">
+          <div class="pdf-stage" id="pdfStage"></div>
+
           <div class="empty-state" id="emptyState">
             <div class="empty-card">
               <div class="empty-title">No PDF loaded yet</div>
               <div class="empty-text">
-                Tap <strong>Load PDF</strong> above, choose a PDF from your phone, then tap the pages to place marks.
+                Tap <strong>Load PDF</strong> above, choose a PDF from your phone, then use:
+                <br />
+                • one tap to place a mark
+                <br />
+                • two fingers to pan or pinch-zoom
               </div>
             </div>
           </div>
