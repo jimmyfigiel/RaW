@@ -36,6 +36,10 @@ function makeId() {
   return Date.now() + "-" + Math.random().toString(16).slice(2);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function createInitialState() {
   return {
     dice: [
@@ -74,6 +78,8 @@ let pdfDoc = null;
 let currentPdfName = "";
 let currentPdfData = null;
 let renderToken = 0;
+let isRollingAll = false;
+const rollingDiceIds = new Set();
 
 function saveState() {
   localStorage.setItem(
@@ -104,6 +110,7 @@ function renderDice() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "die-button";
+    button.disabled = isRollingAll || rollingDiceIds.has(die.id);
     button.setAttribute("aria-label", `Reroll die ${index + 1}`);
 
     const face = document.createElement("div");
@@ -112,21 +119,52 @@ function renderDice() {
 
     button.appendChild(face);
     button.addEventListener("click", function () {
-      die.value = roll();
-      saveState();
-      renderDice();
+      rerollOneAnimated(die.id);
     });
 
     diceRow.appendChild(button);
   });
 }
 
-function rerollAll() {
-  state.dice = state.dice.map((die) => ({
-    id: die.id,
-    color: die.color,
-    value: roll()
-  }));
+async function animateDieRoll(die) {
+  for (let i = 0; i < 5; i += 1) {
+    die.value = roll();
+    renderDice();
+    await sleep(90);
+  }
+}
+
+async function rerollOneAnimated(dieId) {
+  if (isRollingAll || rollingDiceIds.has(dieId)) return;
+
+  const die = state.dice.find((item) => item.id === dieId);
+  if (!die) return;
+
+  rollingDiceIds.add(dieId);
+  renderDice();
+
+  await animateDieRoll(die);
+
+  rollingDiceIds.delete(dieId);
+  saveState();
+  renderDice();
+}
+
+async function rerollAll() {
+  if (isRollingAll || rollingDiceIds.size > 0) return;
+
+  isRollingAll = true;
+  renderDice();
+
+  for (let i = 0; i < 5; i += 1) {
+    state.dice.forEach((die) => {
+      die.value = roll();
+    });
+    renderDice();
+    await sleep(90);
+  }
+
+  isRollingAll = false;
   saveState();
   renderDice();
 }
@@ -365,7 +403,7 @@ async function renderPdf() {
   const myToken = ++renderToken;
   pdfViewer.innerHTML = "";
   pdfViewer.appendChild(makeLoadingCard("Rendering PDF..."));
-  emptyState.style.display = "none";
+  if (emptyState) emptyState.style.display = "none";
 
   const nextViewer = document.createElement("div");
 
@@ -403,7 +441,6 @@ async function renderPdf() {
     annotationLayer.dataset.page = String(pageNumber);
 
     renderAnnotationsForPage(pageNumber, annotationLayer);
-    makeDiceBoxOverlay(pageNumber, annotationLayer);
 
     pageShell.appendChild(canvas);
     pageShell.appendChild(annotationLayer);
@@ -421,14 +458,6 @@ async function renderPdf() {
   pdfNote.textContent = currentPdfName
     ? `${currentPdfName} loaded. Scroll through pages below. Tap to place marks.`
     : "PDF loaded. Scroll through pages below. Tap to place marks.";
-}
-
-function makeDiceBoxOverlay(pageNumber, layer) {
-  if (pageNumber !== 1) return;
-
-  // Optional: show current dice values near the top of the first page.
-  // This is intentionally subtle and only appears if the first page is tapped/used.
-  // Remove this whole function call if you do not want the PDF overlay to reflect dice values.
 }
 
 async function loadPdfFromArrayBuffer(buffer, fileName) {
