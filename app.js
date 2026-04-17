@@ -1,123 +1,181 @@
 (function () {
+  const STORAGE_KEY = "roll-and-write-pwa-state-v2";
+
   const diceRow = document.getElementById("diceRow");
+  const annotationLayer = document.getElementById("annotationLayer");
   const board = document.getElementById("board");
-  const marksLayer = document.getElementById("marksLayer");
-  const statusText = document.getElementById("statusText");
-  const installButton = document.getElementById("installButton");
 
-  const toolButtons = {
-    number: document.getElementById("toolNumber"),
-    dot: document.getElementById("toolDot"),
-    circle: document.getElementById("toolCircle"),
-  };
-
+  const toolNumber = document.getElementById("toolNumber");
+  const toolDot = document.getElementById("toolDot");
+  const toolCircle = document.getElementById("toolCircle");
   const undoButton = document.getElementById("undoButton");
-  const rollButton = document.getElementById("rollButton");
+  const rollAllButton = document.getElementById("rollAllButton");
 
-  const state = {
-    dice: [roll(), roll(), roll(), roll(), roll(), roll()],
-    tool: "dot",
-    marks: [],
-  };
-
-  let deferredPrompt = null;
+  const numberPadBackdrop = document.getElementById("numberPadBackdrop");
+  const closePadButton = document.getElementById("closePadButton");
+  const numberGrid = document.getElementById("numberGrid");
 
   function roll() {
     return Math.floor(Math.random() * 6) + 1;
   }
 
-  function saveState() {
-    try {
-      localStorage.setItem("roll-and-write-pwa-state", JSON.stringify(state));
-    } catch (error) {
-      console.warn("Could not save state", error);
+  function makeId() {
+    if (window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID();
     }
+    return Date.now() + "-" + Math.random().toString(16).slice(2);
+  }
+
+  function createInitialState() {
+    return {
+      dice: [
+        { id: "w1", color: "white", value: roll() },
+        { id: "w2", color: "white", value: roll() },
+        { id: "w3", color: "white", value: roll() },
+        { id: "b1", color: "black", value: roll() },
+        { id: "b2", color: "black", value: roll() },
+        { id: "b3", color: "black", value: roll() }
+      ],
+      tool: "number",
+      marks: []
+    };
   }
 
   function loadState() {
     try {
-      const raw = localStorage.getItem("roll-and-write-pwa-state");
-      if (!raw) return;
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return createInitialState();
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed.dice) && parsed.dice.length === 6) {
-        state.dice = parsed.dice;
+      if (!parsed || !Array.isArray(parsed.dice) || !Array.isArray(parsed.marks)) {
+        return createInitialState();
       }
-      if (parsed.tool === "number" || parsed.tool === "dot" || parsed.tool === "circle") {
-        state.tool = parsed.tool;
-      }
-      if (Array.isArray(parsed.marks)) {
-        state.marks = parsed.marks;
-      }
-    } catch (error) {
-      console.warn("Could not load state", error);
+      return {
+        dice: parsed.dice,
+        tool: parsed.tool || "number",
+        marks: parsed.marks
+      };
+    } catch (err) {
+      return createInitialState();
     }
+  }
+
+  let state = loadState();
+  let pendingPoint = null;
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function setTool(nextTool) {
+    state.tool = nextTool;
+    renderToolButtons();
+    saveState();
+  }
+
+  function renderToolButtons() {
+    toolNumber.classList.toggle("active", state.tool === "number");
+    toolDot.classList.toggle("active", state.tool === "dot");
+    toolCircle.classList.toggle("active", state.tool === "circle");
   }
 
   function renderDice() {
     diceRow.innerHTML = "";
-    state.dice.forEach(function (value, index) {
+
+    state.dice.forEach((die, index) => {
       const button = document.createElement("button");
-      button.className = "die " + (index < 3 ? "die-white" : "die-black");
-      button.textContent = String(value);
+      button.type = "button";
+      button.className = "die-button";
+      button.setAttribute("aria-label", "Reroll die " + (index + 1));
+
+      const face = document.createElement("div");
+      face.className = "die-face " + die.color;
+      face.textContent = String(die.value);
+
+      button.appendChild(face);
       button.addEventListener("click", function () {
-        state.dice[index] = roll();
+        die.value = roll();
         saveState();
         renderDice();
       });
+
       diceRow.appendChild(button);
     });
   }
 
-  function renderTools() {
-    Object.keys(toolButtons).forEach(function (key) {
-      if (state.tool === key) {
-        toolButtons[key].classList.add("active");
-      } else {
-        toolButtons[key].classList.remove("active");
-      }
-    });
-
-    const names = {
-      number: "Number",
-      dot: "Dot",
-      circle: "O/X",
-    };
-
-    statusText.textContent = "Tool: " + names[state.tool];
-  }
-
   function renderMarks() {
-    marksLayer.innerHTML = "";
-    state.marks.forEach(function (mark) {
+    annotationLayer.innerHTML = "";
+
+    state.marks.forEach((mark) => {
       const el = document.createElement("div");
+      el.className = "mark " + mark.type;
       el.style.left = (mark.x * 100) + "%";
       el.style.top = (mark.y * 100) + "%";
 
       if (mark.type === "dot") {
-        el.className = "mark-dot";
-      } else if (mark.type === "number") {
-        el.className = "mark-number";
-        el.textContent = mark.value;
-      } else if (mark.type === "circle" || mark.type === "circleX") {
-        el.className = "mark-circle" + (mark.type === "circleX" ? " crossed" : "");
-        const helper = document.createElement("span");
-        el.appendChild(helper);
+        annotationLayer.appendChild(el);
+        return;
       }
 
-      marksLayer.appendChild(el);
+      if (mark.type === "number") {
+        el.textContent = mark.value;
+        annotationLayer.appendChild(el);
+        return;
+      }
+
+      if (mark.type === "circle" || mark.type === "circlex") {
+        const ring = document.createElement("div");
+        ring.className = "circle-ring";
+        el.appendChild(ring);
+
+        if (mark.type === "circlex") {
+          const a = document.createElement("div");
+          a.className = "x-line a";
+          const b = document.createElement("div");
+          b.className = "x-line b";
+          el.appendChild(a);
+          el.appendChild(b);
+        }
+
+        annotationLayer.appendChild(el);
+      }
     });
   }
 
-  function setTool(tool) {
-    state.tool = tool;
-    saveState();
-    renderTools();
+  function renderSheetGrid() {
+    const svg = document.querySelector(".sheet-svg");
+    const gridDataEl = document.getElementById("gridData");
+    if (!svg || !gridDataEl) return;
+
+    let cfg;
+    try {
+      cfg = JSON.parse(gridDataEl.textContent);
+    } catch (e) {
+      return;
+    }
+
+    for (let r = 0; r < cfg.rows; r += 1) {
+      for (let c = 0; c < cfg.cols; c += 1) {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const x = cfg.startX + c * cfg.stepX + cfg.size / 2;
+        const y = cfg.startY + r * cfg.stepY + cfg.size / 2;
+        circle.setAttribute("cx", String(x));
+        circle.setAttribute("cy", String(y));
+        circle.setAttribute("r", String(cfg.size / 2));
+        circle.setAttribute("class", "sheet-circle");
+        circle.setAttribute("fill", "none");
+        circle.setAttribute("stroke", "#c4c8cf");
+        circle.setAttribute("stroke-width", "2");
+        svg.appendChild(circle);
+      }
+    }
   }
 
   function rerollAll() {
-    state.dice = state.dice.map(function () {
-      return roll();
-    });
+    state.dice = state.dice.map((die) => ({
+      id: die.id,
+      color: die.color,
+      value: roll()
+    }));
     saveState();
     renderDice();
   }
@@ -128,110 +186,141 @@
     renderMarks();
   }
 
-  function boardPointFromEvent(event) {
-    const rect = board.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    return { x: x, y: y };
+  function addMark(mark) {
+    state.marks.push(mark);
+    saveState();
+    renderMarks();
   }
 
   function findNearbyCircle(x, y) {
     for (let i = state.marks.length - 1; i >= 0; i -= 1) {
       const mark = state.marks[i];
-      if (mark.type !== "circle" && mark.type !== "circleX") continue;
+      if (mark.type !== "circle" && mark.type !== "circlex") continue;
+
       const dx = mark.x - x;
       const dy = mark.y - y;
-      if (Math.sqrt((dx * dx) + (dy * dy)) < 0.05) {
+
+      if (Math.sqrt(dx * dx + dy * dy) < 0.04) {
         return i;
       }
     }
     return -1;
   }
 
-  function handleBoardClick(event) {
-    const point = boardPointFromEvent(event);
+  function openNumberPad(x, y) {
+    pendingPoint = { x, y };
+    numberPadBackdrop.classList.remove("hidden");
+  }
 
+  function closeNumberPad() {
+    pendingPoint = null;
+    numberPadBackdrop.classList.add("hidden");
+  }
+
+  function placeFromTool(x, y) {
     if (state.tool === "dot") {
-      state.marks.push({ type: "dot", x: point.x, y: point.y });
-      saveState();
-      renderMarks();
+      addMark({
+        id: makeId(),
+        type: "dot",
+        x,
+        y
+      });
       return;
     }
 
     if (state.tool === "number") {
-      const value = window.prompt("Enter number");
-      if (!value) return;
-      state.marks.push({ type: "number", x: point.x, y: point.y, value: value });
-      saveState();
-      renderMarks();
+      openNumberPad(x, y);
       return;
     }
 
     if (state.tool === "circle") {
-      const existingIndex = findNearbyCircle(point.x, point.y);
-      if (existingIndex !== -1) {
-        state.marks[existingIndex].type = "circleX";
+      const idx = findNearbyCircle(x, y);
+      if (idx !== -1) {
+        if (state.marks[idx].type === "circle") {
+          state.marks[idx].type = "circlex";
+          saveState();
+          renderMarks();
+        }
       } else {
-        state.marks.push({ type: "circle", x: point.x, y: point.y });
+        addMark({
+          id: makeId(),
+          type: "circle",
+          x,
+          y
+        });
       }
-      saveState();
-      renderMarks();
     }
   }
 
-  function registerInstallPrompt() {
-    window.addEventListener("beforeinstallprompt", function (event) {
-      event.preventDefault();
-      deferredPrompt = event;
-      installButton.classList.remove("hidden");
-    });
+  function handleBoardClick(event) {
+    const rect = board.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    placeFromTool(x, y);
+  }
 
-    installButton.addEventListener("click", async function () {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt();
-      try {
-        await deferredPrompt.userChoice;
-      } catch (error) {
-        console.warn("Install prompt failed", error);
-      }
-      deferredPrompt = null;
-      installButton.classList.add("hidden");
+  function buildNumberPad() {
+    const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+    numberGrid.innerHTML = "";
+
+    values.forEach((value) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "number-pick";
+      button.textContent = value;
+      button.addEventListener("click", function () {
+        if (!pendingPoint) return;
+        addMark({
+          id: makeId(),
+          type: "number",
+          x: pendingPoint.x,
+          y: pendingPoint.y,
+          value
+        });
+        closeNumberPad();
+      });
+      numberGrid.appendChild(button);
     });
   }
 
   function registerServiceWorker() {
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
-        navigator.serviceWorker.register("./service-worker.js").catch(function (error) {
-          console.warn("Service worker registration failed", error);
-        });
+        navigator.serviceWorker.register("./service-worker.js").catch(function () {});
       });
     }
   }
 
-  function bindEvents() {
-    toolButtons.number.addEventListener("click", function () {
+  function init() {
+    renderSheetGrid();
+    renderToolButtons();
+    renderDice();
+    renderMarks();
+    buildNumberPad();
+    registerServiceWorker();
+
+    toolNumber.addEventListener("click", function () {
       setTool("number");
     });
 
-    toolButtons.dot.addEventListener("click", function () {
+    toolDot.addEventListener("click", function () {
       setTool("dot");
     });
 
-    toolButtons.circle.addEventListener("click", function () {
+    toolCircle.addEventListener("click", function () {
       setTool("circle");
     });
 
     undoButton.addEventListener("click", undo);
-    rollButton.addEventListener("click", rerollAll);
+    rollAllButton.addEventListener("click", rerollAll);
     board.addEventListener("click", handleBoardClick);
+    closePadButton.addEventListener("click", closeNumberPad);
+    numberPadBackdrop.addEventListener("click", function (event) {
+      if (event.target === numberPadBackdrop) {
+        closeNumberPad();
+      }
+    });
   }
 
-  loadState();
-  bindEvents();
-  renderDice();
-  renderTools();
-  renderMarks();
-  registerInstallPrompt();
-  registerServiceWorker();
+  init();
 })();
