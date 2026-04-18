@@ -20,26 +20,43 @@
         <div class="dice-row" id="diceRow"></div>
 
         <div class="tool-row">
-          <button class="tool-button active" id="toolNumber" type="button">123</button>
-          <button class="tool-button" id="toolDot" type="button">Dot</button>
-          <button class="tool-button" id="toolCircle" type="button">O/X</button>
-          <button class="tool-button secondary" id="undoButton" type="button">Undo</button>
-          <button class="tool-button secondary" id="rollAllButton" type="button">Roll All</button>
+          <button class="tool-button active" id="toolNumber" type="button">
+            <span class="rotate-text">123</span>
+          </button>
+          <button class="tool-button" id="toolDot" type="button">
+            <span class="rotate-text">Dot</span>
+          </button>
+          <button class="tool-button" id="toolCircle" type="button">
+            <span class="rotate-text">O/X</span>
+          </button>
+          <button class="tool-button secondary" id="undoButton" type="button">
+            <span class="rotate-text">Undo</span>
+          </button>
+          <button class="tool-button secondary" id="rollAllButton" type="button">
+            <span class="rotate-text">Roll All</span>
+          </button>
         </div>
 
         <div class="pdf-controls">
-          <label class="file-button" for="pdfInput">Load PDF</label>
+          <label class="file-button" for="pdfInput">
+            <span class="rotate-text">Load PDF</span>
+          </label>
           <input id="pdfInput" type="file" accept="application/pdf" />
 
-          <button class="zoom-button" id="zoomOutButton" type="button">-</button>
-          <div class="zoom-label" id="zoomLabel">100%</div>
-          <button class="zoom-button" id="zoomInButton" type="button">+</button>
+          <label class="file-button" for="gameInput">
+            <span class="rotate-text">Load Game</span>
+          </label>
+          <input id="gameInput" type="file" accept=".json,application/json" />
+
+          <button class="file-button" id="saveGameButton" type="button">
+            <span class="rotate-text">Save Game</span>
+          </button>
         </div>
       </header>
 
       <main class="bottom-panel">
         <div class="pdf-note" id="pdfNote">
-          Load a PDF to begin. Use two fingers inside the PDF area to pan and zoom.
+          Load a PDF to begin. One tap places marks. Two fingers pan and zoom inside the PDF area.
         </div>
 
         <div class="pdf-viewport" id="pdfViewport">
