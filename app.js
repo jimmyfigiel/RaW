@@ -4,6 +4,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs";
 
 const STORAGE_KEY = "roll-and-write-pwa-custom-viewport-v1";
+const TAP_CANCEL_MS = 250;
 
 const diceRow = document.getElementById("diceRow");
 const pdfInput = document.getElementById("pdfInput");
@@ -99,7 +100,8 @@ const gesture = {
   startScale: 1,
   startMidWorldX: 0,
   startMidWorldY: 0,
-  tapCandidate: null
+  tapCandidate: null,
+  suppressTapUntil: 0
 };
 
 function saveState() {
@@ -368,44 +370,14 @@ function worldPointFromScreen(clientX, clientY) {
   };
 }
 
-function screenPointFromWorld(worldX, worldY) {
-  return {
-    x: worldX * view.scale + view.offsetX,
-    y: worldY * view.scale + view.offsetY
-  };
-}
-
-function setScaleAroundWorldPoint(nextScale, worldX, worldY, anchorScreenX, anchorScreenY) {
-  view.scale = Math.max(view.minScale, Math.min(view.maxScale, nextScale));
+function setScaleAround(nextScale, worldX, worldY, anchorScreenX, anchorScreenY) {
+  view.scale = Math.max(view.minScale, Math.min(view.maxScale, Number(nextScale.toFixed(3))));
   view.offsetX = anchorScreenX - worldX * view.scale;
   view.offsetY = anchorScreenY - worldY * view.scale;
   clampOffsets();
   applyTransform();
   state.zoom = view.scale;
   saveState();
-}
-
-function fitStageToViewport() {
-  if (!view.stageWidth || !view.stageHeight) return;
-  const viewportWidth = pdfViewport.clientWidth;
-  const viewportHeight = pdfViewport.clientHeight;
-
-  const scaleX = viewportWidth / view.stageWidth;
-  const scaleY = viewportHeight / view.stageHeight;
-
-  view.fitScale = Math.min(scaleX, scaleY, 1);
-  if (!Number.isFinite(view.fitScale) || view.fitScale <= 0) {
-    view.fitScale = 1;
-  }
-
-  if (!pdfDoc) {
-    view.scale = 1;
-  } else if (view.scale < view.minScale || view.scale > view.maxScale) {
-    view.scale = Math.max(view.minScale, Math.min(view.maxScale, view.fitScale));
-  }
-
-  clampOffsets();
-  applyTransform();
 }
 
 function getDistance(a, b) {
@@ -448,6 +420,10 @@ function hitTestPage(worldX, worldY) {
   return null;
 }
 
+function suppressTapTemporarily() {
+  gesture.suppressTapUntil = Date.now() + TAP_CANCEL_MS;
+}
+
 function resetGestureMode() {
   gesture.mode = "none";
   gesture.startDistance = 0;
@@ -472,6 +448,7 @@ function updateGestureMode() {
     gesture.startMidWorldX = midpointWorld.x;
     gesture.startMidWorldY = midpointWorld.y;
     gesture.tapCandidate = null;
+    suppressTapTemporarily();
     return;
   }
 
@@ -540,6 +517,7 @@ function handleViewportPointerMove(event) {
     applyTransform();
     state.zoom = view.scale;
     saveState();
+    suppressTapTemporarily();
     return;
   }
 
@@ -549,6 +527,7 @@ function handleViewportPointerMove(event) {
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
       gesture.mode = "moved";
       gesture.tapCandidate = null;
+      suppressTapTemporarily();
     }
   }
 }
@@ -560,7 +539,8 @@ function handleViewportPointerUp(event) {
   const hadTapCandidate =
     gesture.mode === "tap" &&
     gesture.tapCandidate &&
-    gesture.tapCandidate.pointerId === event.pointerId;
+    gesture.tapCandidate.pointerId === event.pointerId &&
+    Date.now() > gesture.suppressTapUntil;
 
   if (hadTapCandidate) {
     const world = worldPointFromScreen(event.clientX, event.clientY);
@@ -581,6 +561,7 @@ function handleViewportPointerUp(event) {
 
 function handleViewportPointerCancel(event) {
   gesture.pointers.delete(event.pointerId);
+  suppressTapTemporarily();
   if (gesture.pointers.size > 0) {
     updateGestureMode();
   } else {
@@ -601,9 +582,6 @@ async function renderPdf() {
   stageContent.style.maxWidth = "760px";
 
   const viewportWidth = Math.max(320, Math.min(760, pdfViewport.clientWidth - 20));
-
-  let yCursor = 0;
-  let maxWidth = 0;
 
   for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
     if (myToken !== renderToken) return;
@@ -656,9 +634,6 @@ async function renderPdf() {
     pageShell.appendChild(annotationLayer);
     pageCard.appendChild(pageShell);
     stageContent.appendChild(pageCard);
-
-    yCursor += pageCard.offsetHeight + 16;
-    maxWidth = Math.max(maxWidth, viewportWidth);
   }
 
   if (myToken !== renderToken) return;
@@ -700,16 +675,7 @@ function updateZoom(delta) {
     y: (anchorScreenY - view.offsetY) / view.scale
   };
   setScaleAround(delta, world.x, world.y, anchorScreenX, anchorScreenY);
-}
-
-function setScaleAround(nextScale, worldX, worldY, anchorScreenX, anchorScreenY) {
-  view.scale = Math.max(view.minScale, Math.min(view.maxScale, Number(nextScale.toFixed(3))));
-  view.offsetX = anchorScreenX - worldX * view.scale;
-  view.offsetY = anchorScreenY - worldY * view.scale;
-  clampOffsets();
-  applyTransform();
-  state.zoom = view.scale;
-  saveState();
+  suppressTapTemporarily();
 }
 
 function registerServiceWorker() {
@@ -741,6 +707,7 @@ function init() {
     if (!file) return;
     const buffer = await file.arrayBuffer();
     await loadPdfFromArrayBuffer(buffer, file.name);
+    suppressTapTemporarily();
   });
 
   closePadButton.addEventListener("click", closeNumberPad);
@@ -753,13 +720,4 @@ function init() {
   pdfViewport.addEventListener("pointerdown", handleViewportPointerDown, { passive: false });
   pdfViewport.addEventListener("pointermove", handleViewportPointerMove, { passive: false });
   pdfViewport.addEventListener("pointerup", handleViewportPointerUp, { passive: false });
-  pdfViewport.addEventListener("pointercancel", handleViewportPointerCancel, { passive: false });
-
-  window.addEventListener("resize", () => {
-    if (pdfDoc) {
-      renderPdf();
-    }
-  });
-}
-
-init();
+  pdfViewport.addEventListe
