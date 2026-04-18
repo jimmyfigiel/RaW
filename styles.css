@@ -444,13 +444,17 @@ label {
     padding: 10px 10px 10px 8px;
   }
 
-  .rotate-text {
-    transform: rotate(-90deg);
-    white-space: nowrap;
-  }
-
   .tool-button,
   .file-button {
     min-height: var(--control-size);
+  }
+
+  .tool-button .rotate-text,
+  .file-button .rotate-text {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+    display: inline-block;
+    line-height: 1;
   }
 }
