@@ -6,7 +6,7 @@
   --text: #111827;
   --muted: #6b7280;
   --accent: #2563eb;
-  --danger: #d11;
+  --mark: #111111;
   --shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
   --shadow-soft: 0 3px 10px rgba(0, 0, 0, 0.10);
 }
@@ -273,15 +273,14 @@ label {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--mark);
 }
 
 .mark.number {
-  color: var(--danger);
+  color: var(--mark);
   font-weight: 700;
   font-size: 0.725rem;
   line-height: 1;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .mark.circle,
@@ -293,7 +292,7 @@ label {
 .mark .circle-ring {
   position: absolute;
   inset: 0;
-  border: 1px solid var(--danger);
+  border: 1px solid var(--mark);
   border-radius: 50%;
 }
 
@@ -303,7 +302,7 @@ label {
   top: 50%;
   width: 100%;
   height: 1px;
-  background: var(--danger);
+  background: var(--mark);
   transform-origin: center;
 }
 
