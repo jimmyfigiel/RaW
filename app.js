@@ -1,9 +1,11 @@
 (function () {
-  const STORAGE_KEY = "roll-and-write-pwa-custom-viewport-v1";
+  const STORAGE_KEY = "roll-and-write-pwa-game-state-v1";
   const TAP_CANCEL_MS = 250;
 
   const diceRow = document.getElementById("diceRow");
   const pdfInput = document.getElementById("pdfInput");
+  const gameInput = document.getElementById("gameInput");
+  const saveGameButton = document.getElementById("saveGameButton");
   const pdfStage = document.getElementById("pdfStage");
   const pdfViewport = document.getElementById("pdfViewport");
   const pdfNote = document.getElementById("pdfNote");
@@ -14,10 +16,6 @@
   const toolCircle = document.getElementById("toolCircle");
   const undoButton = document.getElementById("undoButton");
   const rollAllButton = document.getElementById("rollAllButton");
-
-  const zoomOutButton = document.getElementById("zoomOutButton");
-  const zoomInButton = document.getElementById("zoomInButton");
-  const zoomLabel = document.getElementById("zoomLabel");
 
   const numberPadBackdrop = document.getElementById("numberPadBackdrop");
   const closePadButton = document.getElementById("closePadButton");
@@ -49,8 +47,7 @@
         { id: "b3", color: "black", value: roll() }
       ],
       tool: "number",
-      marks: [],
-      zoom: 1
+      marks: []
     };
   }
 
@@ -62,8 +59,7 @@
       return {
         dice: Array.isArray(parsed.dice) ? parsed.dice : createInitialState().dice,
         tool: parsed.tool || "number",
-        marks: Array.isArray(parsed.marks) ? parsed.marks : [],
-        zoom: typeof parsed.zoom === "number" ? parsed.zoom : 1
+        marks: Array.isArray(parsed.marks) ? parsed.marks : []
       };
     } catch (e) {
       return createInitialState();
@@ -77,13 +73,15 @@
   let renderToken = 0;
   let isRollingAll = false;
   const rollingDiceIds = new Set();
+  let pendingGameView = null;
+  let pendingGamePdfName = "";
 
   const view = {
-    scale: Math.max(0.5, Math.min(3, state.zoom || 1)),
+    scale: 1,
     offsetX: 0,
     offsetY: 0,
-    minScale: 0.5,
-    maxScale: 3,
+    minScale: 1,
+    maxScale: 6,
     stageWidth: 0,
     stageHeight: 0
   };
@@ -105,8 +103,7 @@
       JSON.stringify({
         dice: state.dice,
         tool: state.tool,
-        marks: state.marks,
-        zoom: view.scale
+        marks: state.marks
       })
     );
   }
@@ -115,10 +112,6 @@
     toolNumber.classList.toggle("active", state.tool === "number");
     toolDot.classList.toggle("active", state.tool === "dot");
     toolCircle.classList.toggle("active", state.tool === "circle");
-  }
-
-  function renderZoomLabel() {
-    zoomLabel.textContent = Math.round(view.scale * 100) + "%";
   }
 
   function renderDice() {
@@ -335,7 +328,6 @@
   function applyTransform() {
     pdfStage.style.transform =
       "translate(" + view.offsetX + "px, " + view.offsetY + "px) scale(" + view.scale + ")";
-    renderZoomLabel();
   }
 
   function clampOffsets() {
@@ -378,8 +370,6 @@
     view.offsetY = anchorScreenY - worldY * view.scale;
     clampOffsets();
     applyTransform();
-    state.zoom = view.scale;
-    saveState();
   }
 
   function getDistance(a, b) {
@@ -517,8 +507,6 @@
 
       clampOffsets();
       applyTransform();
-      state.zoom = view.scale;
-      saveState();
       suppressTapTemporarily();
       return;
     }
@@ -571,6 +559,36 @@
     }
   }
 
+  function applyPendingGameViewIfReady() {
+    if (!pendingGameView) return;
+    if (!pdfDoc) return;
+
+    if (pendingGamePdfName && currentPdfName && pendingGamePdfName !== currentPdfName) {
+      pdfNote.textContent =
+        'Game loaded. Now load PDF "' + pendingGamePdfName + '" to fully restore that session.';
+      return;
+    }
+
+    if (typeof pendingGameView.scale === "number") {
+      view.scale = Math.max(view.minScale, Math.min(view.maxScale, pendingGameView.scale));
+    } else {
+      view.scale = view.minScale;
+    }
+
+    if (typeof pendingGameView.offsetX === "number") {
+      view.offsetX = pendingGameView.offsetX;
+    }
+
+    if (typeof pendingGameView.offsetY === "number") {
+      view.offsetY = pendingGameView.offsetY;
+    }
+
+    clampOffsets();
+    applyTransform();
+    pendingGameView = null;
+    pendingGamePdfName = "";
+  }
+
   async function renderPdf() {
     if (!pdfDoc) return;
 
@@ -580,10 +598,10 @@
     if (emptyState) emptyState.style.display = "none";
 
     const stageContent = document.createElement("div");
-    stageContent.style.width = "760px";
-    stageContent.style.maxWidth = "760px";
+    stageContent.style.width = "900px";
+    stageContent.style.maxWidth = "900px";
 
-    const viewportWidth = Math.max(320, Math.min(760, pdfViewport.clientWidth - 20));
+    const viewportWidth = Math.max(320, Math.min(900, pdfViewport.clientWidth - 20));
 
     for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
       if (myToken !== renderToken) return;
@@ -647,24 +665,21 @@
     view.stageWidth = rect.width;
     view.stageHeight = rect.height;
 
-    view.minScale = Math.min(
-      1,
-      Math.max(0.35, pdfViewport.clientWidth / Math.max(1, view.stageWidth))
-    );
+    const fitWidthScale = pdfViewport.clientWidth / Math.max(1, view.stageWidth);
+    view.minScale = fitWidthScale;
+    view.maxScale = Math.max(6, fitWidthScale * 6);
 
-    if (view.scale < view.minScale) {
+    if (!Number.isFinite(view.scale) || view.scale < view.minScale) {
       view.scale = view.minScale;
     }
 
     clampOffsets();
     applyTransform();
+    applyPendingGameViewIfReady();
 
     pdfNote.textContent = currentPdfName
       ? currentPdfName + " loaded. One tap places marks. Two fingers pan and zoom inside the PDF area."
       : "PDF loaded. One tap places marks. Two fingers pan and zoom inside the PDF area.";
-
-    state.zoom = view.scale;
-    saveState();
   }
 
   async function loadPdfFromArrayBuffer(buffer, fileName) {
@@ -674,16 +689,70 @@
     await renderPdf();
   }
 
-  function updateZoom(deltaScale) {
-    const rect = pdfViewport.getBoundingClientRect();
-    const anchorScreenX = rect.width / 2;
-    const anchorScreenY = rect.height / 2;
-    const world = {
-      x: (anchorScreenX - view.offsetX) / view.scale,
-      y: (anchorScreenY - view.offsetY) / view.scale
+  function buildSavePayload() {
+    return {
+      version: 1,
+      pdfName: currentPdfName || "",
+      dice: state.dice,
+      marks: state.marks,
+      tool: state.tool,
+      view: {
+        scale: view.scale,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY
+      }
     };
-    setScaleAround(deltaScale, world.x, world.y, anchorScreenX, anchorScreenY);
-    suppressTapTemporarily();
+  }
+
+  function saveGameToFile() {
+    const payload = buildSavePayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const baseName = (currentPdfName || "roll-and-write-game").replace(/\.pdf$/i, "");
+    link.href = url;
+    link.download = baseName + ".game.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    pdfNote.textContent = "Game saved.";
+  }
+
+  function loadGameData(data) {
+    if (!data || typeof data !== "object") {
+      pdfNote.textContent = "That save file could not be read.";
+      return;
+    }
+
+    state.dice = Array.isArray(data.dice) ? data.dice : createInitialState().dice;
+    state.marks = Array.isArray(data.marks) ? data.marks : [];
+    state.tool = data.tool || "number";
+
+    pendingGameView = data.view || null;
+    pendingGamePdfName = data.pdfName || "";
+
+    saveState();
+    renderDice();
+    renderToolButtons();
+    rerenderAnnotationsOnly();
+
+    if (pdfDoc) {
+      applyPendingGameViewIfReady();
+      rerenderAnnotationsOnly();
+      if (!pendingGameView) {
+        pdfNote.textContent = "Game loaded.";
+      }
+    } else if (pendingGamePdfName) {
+      pdfNote.textContent =
+        'Game loaded. Now load PDF "' + pendingGamePdfName + '" to restore the board.';
+    } else {
+      pdfNote.textContent = "Game loaded. Now load the matching PDF.";
+    }
   }
 
   function registerServiceWorker() {
@@ -697,7 +766,6 @@
   function init() {
     renderDice();
     renderToolButtons();
-    renderZoomLabel();
     buildNumberPad();
     registerServiceWorker();
 
@@ -712,13 +780,7 @@
     });
     undoButton.addEventListener("click", undo);
     rollAllButton.addEventListener("click", rerollAll);
-
-    zoomOutButton.addEventListener("click", function () {
-      updateZoom(view.scale - 0.1);
-    });
-    zoomInButton.addEventListener("click", function () {
-      updateZoom(view.scale + 0.1);
-    });
+    saveGameButton.addEventListener("click", saveGameToFile);
 
     pdfInput.addEventListener("change", async function (event) {
       const file = event.target.files && event.target.files[0];
@@ -726,6 +788,18 @@
       const buffer = await file.arrayBuffer();
       await loadPdfFromArrayBuffer(buffer, file.name);
       suppressTapTemporarily();
+    });
+
+    gameInput.addEventListener("change", async function (event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const data = JSON.parse(text);
+        loadGameData(data);
+      } catch (e) {
+        pdfNote.textContent = "That save file is not valid JSON.";
+      }
     });
 
     closePadButton.addEventListener("click", closeNumberPad);
