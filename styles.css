@@ -10,7 +10,8 @@
   --shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
   --shadow-soft: 0 3px 10px rgba(0, 0, 0, 0.10);
   --control-size: 48px;
-  --landscape-sidebar-width: 220px;
+  --landscape-gap: 8px;
+  --landscape-sidebar-width: 112px;
 }
 
 * {
@@ -78,6 +79,7 @@ label {
   border: 0;
   background: transparent;
   padding: 0;
+  width: 100%;
 }
 
 .die-face {
@@ -91,6 +93,7 @@ label {
   font-weight: 700;
   box-shadow: var(--shadow-soft);
   user-select: none;
+  width: 100%;
 }
 
 .die-face.white {
@@ -431,25 +434,47 @@ label {
       8px;
     overflow-y: auto;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 8px;
+    grid-template-columns: var(--control-size) var(--control-size);
+    column-gap: var(--landscape-gap);
     row-gap: 0;
+    justify-content: center;
     align-content: start;
     align-items: start;
   }
 
   .dice-row {
     grid-column: 1;
-    grid-template-columns: 1fr;
+    grid-template-columns: var(--control-size);
     gap: 8px;
     margin: 0;
+    justify-content: center;
+  }
+
+  .die-button {
+    width: var(--control-size);
+  }
+
+  .die-face {
+    width: var(--control-size);
+    font-size: 1.55rem;
   }
 
   .tool-row {
     grid-column: 2;
     margin-top: 0;
-    grid-template-columns: 1fr;
+    grid-template-columns: var(--control-size);
     gap: 8px;
+    justify-content: center;
+  }
+
+  .tool-button {
+    width: var(--control-size);
+    min-height: var(--control-size);
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+    line-height: 1;
+    padding: 0;
   }
 
   .pdf-controls {
@@ -458,18 +483,5 @@ label {
 
   .bottom-panel {
     padding: 10px 10px 10px 8px;
-  }
-
-  .tool-button,
-  .file-button {
-    min-height: var(--control-size);
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-    white-space: nowrap;
-    line-height: 1;
-  }
-
-  .die-face {
-    font-size: 1.55rem;
   }
 }
