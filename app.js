@@ -1,5 +1,6 @@
 (function () {
-  const STORAGE_KEY = "roll-and-write-pwa-game-state-v1";
+  const STORAGE_KEY = "roll-and-write-pwa-game-state-v2";
+  const TAP_CANCEL_MS = 250;
 
   const diceRow = document.getElementById("diceRow");
   const pdfInput = document.getElementById("pdfInput");
@@ -56,11 +57,11 @@
       if (!raw) return createInitialState();
       const parsed = JSON.parse(raw);
       return {
-        dice: parsed.dice || createInitialState().dice,
+        dice: Array.isArray(parsed.dice) ? parsed.dice : createInitialState().dice,
         tool: parsed.tool || "number",
-        marks: parsed.marks || []
+        marks: Array.isArray(parsed.marks) ? parsed.marks : []
       };
-    } catch {
+    } catch (e) {
       return createInitialState();
     }
   }
@@ -70,6 +71,31 @@
   let pdfDoc = null;
   let currentPdfName = "";
   let renderToken = 0;
+  let isRollingAll = false;
+  const rollingDiceIds = new Set();
+  let pendingGameView = null;
+  let pendingGamePdfName = "";
+
+  const view = {
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    minScale: 1,
+    maxScale: 6,
+    stageWidth: 0,
+    stageHeight: 0
+  };
+
+  const gesture = {
+    pointers: new Map(),
+    mode: "none",
+    startDistance: 0,
+    startScale: 1,
+    startMidWorldX: 0,
+    startMidWorldY: 0,
+    tapCandidate: null,
+    suppressTapUntil: 0
+  };
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -86,49 +112,112 @@
 
     state.dice.forEach((die, index) => {
       const button = document.createElement("button");
-      button.className = "die-button";
       button.type = "button";
+      button.className = "die-button";
+      button.disabled = isRollingAll || rollingDiceIds.has(die.id);
       button.setAttribute("aria-label", "Reroll die " + (index + 1));
 
       const face = document.createElement("div");
       face.className = "die-face " + die.color;
-      face.textContent = die.value;
+      face.textContent = String(die.value);
 
       button.appendChild(face);
-      button.onclick = async () => {
-        for (let i = 0; i < 5; i++) {
-          die.value = roll();
-          renderDice();
-          await sleep(90);
-        }
-        saveState();
-      };
+      button.addEventListener("click", function () {
+        rerollOneAnimated(die.id);
+      });
 
       diceRow.appendChild(button);
     });
   }
 
+  async function animateDieRoll(die) {
+    for (let i = 0; i < 5; i += 1) {
+      die.value = roll();
+      renderDice();
+      await sleep(90);
+    }
+  }
+
+  async function rerollOneAnimated(dieId) {
+    if (isRollingAll || rollingDiceIds.has(dieId)) return;
+    const die = state.dice.find((item) => item.id === dieId);
+    if (!die) return;
+
+    rollingDiceIds.add(dieId);
+    renderDice();
+    await animateDieRoll(die);
+    rollingDiceIds.delete(dieId);
+    saveState();
+    renderDice();
+  }
+
   async function rerollAll() {
-    for (let i = 0; i < 5; i++) {
-      state.dice.forEach((d) => {
-        d.value = roll();
+    if (isRollingAll || rollingDiceIds.size > 0) return;
+
+    isRollingAll = true;
+    renderDice();
+
+    for (let i = 0; i < 5; i += 1) {
+      state.dice.forEach((die) => {
+        die.value = roll();
       });
       renderDice();
       await sleep(90);
     }
+
+    isRollingAll = false;
     saveState();
+    renderDice();
   }
 
   function undo() {
-    state.marks.pop();
+    state.marks = state.marks.slice(0, -1);
     saveState();
     rerenderAnnotationsOnly();
   }
 
-  function setTool(tool) {
-    state.tool = tool;
+  function setTool(nextTool) {
+    state.tool = nextTool;
     saveState();
     renderToolButtons();
+  }
+
+  function openNumberPad(page, x, y) {
+    pendingPoint = { page: page, x: x, y: y };
+    numberPadBackdrop.classList.remove("hidden");
+  }
+
+  function closeNumberPad() {
+    pendingPoint = null;
+    numberPadBackdrop.classList.add("hidden");
+  }
+
+  function buildNumberPad() {
+    const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+    numberGrid.innerHTML = "";
+
+    values.forEach((value) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "number-pick";
+      button.textContent = value;
+      button.addEventListener("click", function () {
+        if (!pendingPoint) return;
+
+        addMark({
+          id: makeId(),
+          page: pendingPoint.page,
+          type: "number",
+          x: pendingPoint.x,
+          y: pendingPoint.y,
+          value: value
+        });
+
+        closeNumberPad();
+      });
+
+      numberGrid.appendChild(button);
+    });
   }
 
   function addMark(mark) {
@@ -137,15 +226,55 @@
     rerenderAnnotationsOnly();
   }
 
+  function marksForPage(pageNumber) {
+    return state.marks.filter((mark) => mark.page === pageNumber);
+  }
+
+  function findNearbyCircle(pageNumber, x, y) {
+    for (let i = state.marks.length - 1; i >= 0; i -= 1) {
+      const mark = state.marks[i];
+      if (mark.page !== pageNumber) continue;
+      if (mark.type !== "circle" && mark.type !== "circlex") continue;
+
+      const dx = mark.x - x;
+      const dy = mark.y - y;
+      if (Math.sqrt(dx * dx + dy * dy) < 0.04) return i;
+    }
+    return -1;
+  }
+
+  function placeFromTool(pageNumber, x, y) {
+    if (state.tool === "dot") {
+      addMark({ id: makeId(), page: pageNumber, type: "dot", x: x, y: y });
+      return;
+    }
+
+    if (state.tool === "number") {
+      openNumberPad(pageNumber, x, y);
+      return;
+    }
+
+    if (state.tool === "circle") {
+      const idx = findNearbyCircle(pageNumber, x, y);
+      if (idx !== -1) {
+        if (state.marks[idx].type === "circle") {
+          state.marks[idx].type = "circlex";
+          saveState();
+          rerenderAnnotationsOnly();
+        }
+      } else {
+        addMark({ id: makeId(), page: pageNumber, type: "circle", x: x, y: y });
+      }
+    }
+  }
+
   function createMarkElement(mark) {
     const el = document.createElement("div");
     el.className = "mark " + mark.type;
     el.style.left = mark.x * 100 + "%";
     el.style.top = mark.y * 100 + "%";
 
-    if (mark.type === "dot") {
-      return el;
-    }
+    if (mark.type === "dot") return el;
 
     if (mark.type === "number") {
       el.textContent = mark.value;
@@ -168,225 +297,457 @@
     return el;
   }
 
+  function renderAnnotationsForPage(pageNumber, layer) {
+    layer.innerHTML = "";
+    marksForPage(pageNumber).forEach((mark) => {
+      layer.appendChild(createMarkElement(mark));
+    });
+  }
+
   function rerenderAnnotationsOnly() {
-    document.querySelectorAll(".annotation-layer").forEach((layer) => {
-      const page = Number(layer.dataset.page);
-      layer.innerHTML = "";
-      state.marks
-        .filter((m) => m.page === page)
-        .forEach((m) => layer.appendChild(createMarkElement(m)));
+    pdfStage.querySelectorAll(".annotation-layer").forEach((layer) => {
+      const pageNumber = Number(layer.dataset.page);
+      renderAnnotationsForPage(pageNumber, layer);
     });
   }
 
-  function openNumberPad(point) {
-    pendingPoint = point;
-    numberPadBackdrop.classList.remove("hidden");
+  function makeLoadingCard(text) {
+    const div = document.createElement("div");
+    div.className = "loading-card";
+    div.textContent = text;
+    return div;
   }
 
-  function closeNumberPad() {
-    pendingPoint = null;
-    numberPadBackdrop.classList.add("hidden");
+  function applyTransform() {
+    pdfStage.style.transform =
+      "translate(" + view.offsetX + "px, " + view.offsetY + "px) scale(" + view.scale + ")";
   }
 
-  function buildNumberPad() {
-    const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
-    numberGrid.innerHTML = "";
+  function clampOffsets() {
+    const viewportWidth = pdfViewport.clientWidth;
+    const viewportHeight = pdfViewport.clientHeight;
+    const scaledWidth = view.stageWidth * view.scale;
+    const scaledHeight = view.stageHeight * view.scale;
 
-    values.forEach((value) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "number-pick";
-      button.textContent = value;
-      button.onclick = () => {
-        if (!pendingPoint) return;
-        addMark({
-          id: makeId(),
-          page: pendingPoint.page,
-          type: "number",
-          x: pendingPoint.x,
-          y: pendingPoint.y,
-          value: value
-        });
-        closeNumberPad();
+    if (scaledWidth <= viewportWidth) {
+      view.offsetX = (viewportWidth - scaledWidth) / 2;
+    } else {
+      const minX = viewportWidth - scaledWidth;
+      if (view.offsetX < minX) view.offsetX = minX;
+      if (view.offsetX > 0) view.offsetX = 0;
+    }
+
+    if (scaledHeight <= viewportHeight) {
+      view.offsetY = (viewportHeight - scaledHeight) / 2;
+    } else {
+      const minY = viewportHeight - scaledHeight;
+      if (view.offsetY < minY) view.offsetY = minY;
+      if (view.offsetY > 0) view.offsetY = 0;
+    }
+  }
+
+  function worldPointFromScreen(clientX, clientY) {
+    const rect = pdfViewport.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+
+    return {
+      x: (localX - view.offsetX) / view.scale,
+      y: (localY - view.offsetY) / view.scale
+    };
+  }
+
+  function setScaleAround(nextScale, worldX, worldY, anchorScreenX, anchorScreenY) {
+    view.scale = Math.max(view.minScale, Math.min(view.maxScale, Number(nextScale.toFixed(3))));
+    view.offsetX = anchorScreenX - worldX * view.scale;
+    view.offsetY = anchorScreenY - worldY * view.scale;
+    clampOffsets();
+    applyTransform();
+  }
+
+  function getDistance(a, b) {
+    const dx = a.clientX - b.clientX;
+    const dy = a.clientY - b.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function getMidpoint(a, b) {
+    return {
+      x: (a.clientX + b.clientX) / 2,
+      y: (a.clientY + b.clientY) / 2
+    };
+  }
+
+  function hitTestPage(worldX, worldY) {
+    const pageShells = Array.from(pdfStage.querySelectorAll(".page-shell"));
+
+    for (let i = 0; i < pageShells.length; i += 1) {
+      const shell = pageShells[i];
+      const left = shell.offsetLeft;
+      const top = shell.offsetTop;
+      const width = shell.offsetWidth;
+      const height = shell.offsetHeight;
+
+      if (
+        worldX >= left &&
+        worldX <= left + width &&
+        worldY >= top &&
+        worldY <= top + height
+      ) {
+        return {
+          page: Number(shell.dataset.page),
+          x: (worldX - left) / width,
+          y: (worldY - top) / height
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function suppressTapTemporarily() {
+    gesture.suppressTapUntil = Date.now() + TAP_CANCEL_MS;
+  }
+
+  function resetGestureMode() {
+    gesture.mode = "none";
+    gesture.startDistance = 0;
+    gesture.startScale = view.scale;
+    gesture.startMidWorldX = 0;
+    gesture.startMidWorldY = 0;
+    gesture.tapCandidate = null;
+  }
+
+  function updateGestureMode() {
+    const pointers = Array.from(gesture.pointers.values());
+
+    if (pointers.length >= 2) {
+      const a = pointers[0];
+      const b = pointers[1];
+      const midpoint = getMidpoint(a, b);
+      const midpointWorld = worldPointFromScreen(midpoint.x, midpoint.y);
+
+      gesture.mode = "gesture";
+      gesture.startDistance = getDistance(a, b);
+      gesture.startScale = view.scale;
+      gesture.startMidWorldX = midpointWorld.x;
+      gesture.startMidWorldY = midpointWorld.y;
+      gesture.tapCandidate = null;
+      suppressTapTemporarily();
+      return;
+    }
+
+    if (pointers.length === 1) {
+      const p = pointers[0];
+      gesture.mode = "tap";
+      gesture.tapCandidate = {
+        pointerId: p.pointerId,
+        startX: p.clientX,
+        startY: p.clientY
       };
-      numberGrid.appendChild(button);
+      return;
+    }
+
+    resetGestureMode();
+  }
+
+  function handleViewportPointerDown(event) {
+    event.preventDefault();
+    pdfViewport.setPointerCapture(event.pointerId);
+
+    gesture.pointers.set(event.pointerId, {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY
     });
+
+    updateGestureMode();
   }
 
-  function findNearbyCircle(page, x, y) {
-    for (let i = state.marks.length - 1; i >= 0; i--) {
-      const m = state.marks[i];
-      if (m.page !== page) continue;
-      if (m.type !== "circle" && m.type !== "circlex") continue;
+  function handleViewportPointerMove(event) {
+    if (!gesture.pointers.has(event.pointerId)) return;
+    event.preventDefault();
 
-      const dx = m.x - x;
-      const dy = m.y - y;
-      if (Math.sqrt(dx * dx + dy * dy) < 0.04) {
-        return i;
+    gesture.pointers.set(event.pointerId, {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY
+    });
+
+    const pointers = Array.from(gesture.pointers.values());
+
+    if (pointers.length >= 2) {
+      const a = pointers[0];
+      const b = pointers[1];
+      const midpoint = getMidpoint(a, b);
+      const dist = getDistance(a, b);
+
+      if (!gesture.startDistance) {
+        updateGestureMode();
+        return;
       }
-    }
-    return -1;
-  }
 
-  function handlePageTap(pageNumber, event) {
-    const shell = event.currentTarget;
-    const rect = shell.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
+      const rawScale = gesture.startScale * (dist / gesture.startDistance);
+      const nextScale = Math.max(view.minScale, Math.min(view.maxScale, rawScale));
 
-    if (state.tool === "dot") {
-      addMark({
-        id: makeId(),
-        page: pageNumber,
-        type: "dot",
-        x: x,
-        y: y
-      });
+      const rect = pdfViewport.getBoundingClientRect();
+      const anchorScreenX = midpoint.x - rect.left;
+      const anchorScreenY = midpoint.y - rect.top;
+
+      view.scale = nextScale;
+      view.offsetX = anchorScreenX - gesture.startMidWorldX * view.scale;
+      view.offsetY = anchorScreenY - gesture.startMidWorldY * view.scale;
+
+      clampOffsets();
+      applyTransform();
+      suppressTapTemporarily();
       return;
     }
 
-    if (state.tool === "number") {
-      openNumberPad({
-        page: pageNumber,
-        x: x,
-        y: y
-      });
+    if (gesture.mode === "tap" && gesture.tapCandidate) {
+      const dx = event.clientX - gesture.tapCandidate.startX;
+      const dy = event.clientY - gesture.tapCandidate.startY;
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        gesture.mode = "moved";
+        gesture.tapCandidate = null;
+        suppressTapTemporarily();
+      }
+    }
+  }
+
+  function handleViewportPointerUp(event) {
+    if (!gesture.pointers.has(event.pointerId)) return;
+    event.preventDefault();
+
+    const hadTapCandidate =
+      gesture.mode === "tap" &&
+      gesture.tapCandidate &&
+      gesture.tapCandidate.pointerId === event.pointerId &&
+      Date.now() > gesture.suppressTapUntil;
+
+    if (hadTapCandidate) {
+      const world = worldPointFromScreen(event.clientX, event.clientY);
+      const hit = hitTestPage(world.x, world.y);
+      if (hit) {
+        placeFromTool(hit.page, hit.x, hit.y);
+      }
+    }
+
+    gesture.pointers.delete(event.pointerId);
+
+    if (gesture.pointers.size > 0) {
+      updateGestureMode();
+    } else {
+      resetGestureMode();
+    }
+  }
+
+  function handleViewportPointerCancel(event) {
+    gesture.pointers.delete(event.pointerId);
+    suppressTapTemporarily();
+    if (gesture.pointers.size > 0) {
+      updateGestureMode();
+    } else {
+      resetGestureMode();
+    }
+  }
+
+  function applyPendingGameViewIfReady() {
+    if (!pendingGameView || !pdfDoc) return;
+
+    if (pendingGamePdfName && currentPdfName && pendingGamePdfName !== currentPdfName) {
+      pdfNote.textContent =
+        'Game loaded. Now load PDF "' + pendingGamePdfName + '" to fully restore that session.';
       return;
     }
 
-    if (state.tool === "circle") {
-      const existing = findNearbyCircle(pageNumber, x, y);
-      if (existing !== -1) {
-        if (state.marks[existing].type === "circle") {
-          state.marks[existing].type = "circlex";
-          saveState();
-          rerenderAnnotationsOnly();
-        }
-      } else {
-        addMark({
-          id: makeId(),
-          page: pageNumber,
-          type: "circle",
-          x: x,
-          y: y
-        });
-      }
+    if (typeof pendingGameView.scale === "number") {
+      view.scale = Math.max(view.minScale, Math.min(view.maxScale, pendingGameView.scale));
+    } else {
+      view.scale = view.minScale;
     }
+
+    if (typeof pendingGameView.offsetX === "number") {
+      view.offsetX = pendingGameView.offsetX;
+    }
+
+    if (typeof pendingGameView.offsetY === "number") {
+      view.offsetY = pendingGameView.offsetY;
+    }
+
+    clampOffsets();
+    applyTransform();
+    pendingGameView = null;
+    pendingGamePdfName = "";
   }
 
   async function renderPdf() {
     if (!pdfDoc) return;
 
-    const token = ++renderToken;
+    const myToken = ++renderToken;
     pdfStage.innerHTML = "";
+    pdfStage.appendChild(makeLoadingCard("Rendering PDF..."));
 
     if (emptyState) {
       emptyState.style.display = "none";
     }
 
-    const loadingCard = document.createElement("div");
-    loadingCard.className = "loading-card";
-    loadingCard.textContent = "Rendering PDF...";
-    pdfStage.appendChild(loadingCard);
+    const stageContent = document.createElement("div");
+    stageContent.style.width = "900px";
+    stageContent.style.maxWidth = "900px";
 
-    for (let p = 1; p <= pdfDoc.numPages; p++) {
-      if (token !== renderToken) return;
+    const viewportWidth = Math.max(320, Math.min(900, pdfViewport.clientWidth - 20));
 
-      const page = await pdfDoc.getPage(p);
+    for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
+      if (myToken !== renderToken) return;
+
+      const page = await pdfDoc.getPage(pageNumber);
       const rawViewport = page.getViewport({ scale: 1 });
-      const maxWidth = Math.min(900, pdfViewport.clientWidth - 20);
-      const scale = maxWidth / rawViewport.width;
-      const renderViewport = page.getViewport({ scale });
+      const fitWidth = viewportWidth - 20;
+      const baseScale = fitWidth / rawViewport.width;
+      const displayWidth = rawViewport.width * baseScale;
+      const displayHeight = rawViewport.height * baseScale;
 
       const pageCard = document.createElement("div");
       pageCard.className = "page-card";
+      pageCard.style.width = viewportWidth + "px";
 
       const meta = document.createElement("div");
       meta.className = "page-meta";
-      meta.textContent = "Page " + p + " of " + pdfDoc.numPages;
+      meta.textContent = "Page " + pageNumber + " of " + pdfDoc.numPages;
       pageCard.appendChild(meta);
 
-      const shell = document.createElement("div");
-      shell.className = "page-shell";
-      shell.dataset.page = String(p);
+      const pageShell = document.createElement("div");
+      pageShell.className = "page-shell";
+      pageShell.dataset.page = String(pageNumber);
+      pageShell.style.width = displayWidth + "px";
+      pageShell.style.height = displayHeight + "px";
 
       const canvas = document.createElement("canvas");
       canvas.className = "page-canvas";
 
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(displayWidth * dpr);
+      canvas.height = Math.floor(displayHeight * dpr);
+      canvas.style.width = displayWidth + "px";
+      canvas.style.height = displayHeight + "px";
+
       const ctx = canvas.getContext("2d");
-      canvas.width = Math.floor(renderViewport.width);
-      canvas.height = Math.floor(renderViewport.height);
-      canvas.style.width = renderViewport.width + "px";
-      canvas.style.height = renderViewport.height + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       await page.render({
         canvasContext: ctx,
-        viewport: renderViewport
+        viewport: page.getViewport({ scale: baseScale })
       }).promise;
 
-      const layer = document.createElement("div");
-      layer.className = "annotation-layer";
-      layer.dataset.page = String(p);
+      const annotationLayer = document.createElement("div");
+      annotationLayer.className = "annotation-layer";
+      annotationLayer.dataset.page = String(pageNumber);
+      renderAnnotationsForPage(pageNumber, annotationLayer);
 
-      shell.appendChild(canvas);
-      shell.appendChild(layer);
-      shell.onclick = function (event) {
-        handlePageTap(p, event);
-      };
-
-      pageCard.appendChild(shell);
-
-      if (token === renderToken) {
-        if (p === 1) {
-          pdfStage.innerHTML = "";
-        }
-        pdfStage.appendChild(pageCard);
-      }
+      pageShell.appendChild(canvas);
+      pageShell.appendChild(annotationLayer);
+      pageCard.appendChild(pageShell);
+      stageContent.appendChild(pageCard);
     }
 
-    rerenderAnnotationsOnly();
+    if (myToken !== renderToken) return;
+
+    pdfStage.innerHTML = "";
+    pdfStage.appendChild(stageContent);
+
+    const rect = stageContent.getBoundingClientRect();
+    view.stageWidth = rect.width;
+    view.stageHeight = rect.height;
+
+    const fitWidthScale = pdfViewport.clientWidth / Math.max(1, view.stageWidth);
+    view.minScale = fitWidthScale;
+    view.maxScale = Math.max(6, fitWidthScale * 6);
+
+    if (!Number.isFinite(view.scale) || view.scale < view.minScale) {
+      view.scale = view.minScale;
+    }
+
+    clampOffsets();
+    applyTransform();
+    applyPendingGameViewIfReady();
+
+    pdfNote.textContent = currentPdfName
+      ? currentPdfName + " loaded. One tap places marks. Two fingers pan and zoom inside the PDF area."
+      : "PDF loaded. One tap places marks. Two fingers pan and zoom inside the PDF area.";
   }
 
-  async function loadPdf(buffer, name) {
-    currentPdfName = name;
+  async function loadPdfFromArrayBuffer(buffer, fileName) {
+    currentPdfName = fileName || "PDF";
     pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
 
     if (emptyState) {
       emptyState.style.display = "none";
     }
 
-    pdfNote.textContent = currentPdfName + " loaded.";
     await renderPdf();
   }
 
   function saveGameToFile() {
-    const blob = new Blob(
-      [
-        JSON.stringify({
-          state: state,
-          pdfName: currentPdfName
-        })
-      ],
-      { type: "application/json" }
-    );
+    const payload = {
+      version: 1,
+      pdfName: currentPdfName || "",
+      dice: state.dice,
+      marks: state.marks,
+      tool: state.tool,
+      view: {
+        scale: view.scale,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY
+      }
+    };
 
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "game.json";
-    a.click();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const baseName = (currentPdfName || "roll-and-write-game").replace(/\.pdf$/i, "");
+    link.href = url;
+    link.download = baseName + ".game.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    pdfNote.textContent = "Game saved.";
   }
 
-  function loadGame(data) {
-    state = data.state || createInitialState();
+  function loadGameData(data) {
+    if (!data || typeof data !== "object") {
+      pdfNote.textContent = "That save file could not be read.";
+      return;
+    }
+
+    state.dice = Array.isArray(data.dice) ? data.dice : createInitialState().dice;
+    state.marks = Array.isArray(data.marks) ? data.marks : [];
+    state.tool = data.tool || "number";
+
+    pendingGameView = data.view || null;
+    pendingGamePdfName = data.pdfName || "";
+
     saveState();
     renderDice();
     renderToolButtons();
     rerenderAnnotationsOnly();
 
-    if (data.pdfName) {
-      pdfNote.textContent = 'Game loaded. Please load PDF "' + data.pdfName + '".';
+    if (pdfDoc) {
+      applyPendingGameViewIfReady();
+      rerenderAnnotationsOnly();
+      if (!pendingGameView) {
+        pdfNote.textContent = "Game loaded.";
+      }
+    } else if (pendingGamePdfName) {
+      pdfNote.textContent =
+        'Game loaded. Now load PDF "' + pendingGamePdfName + '" to restore the board.';
     } else {
-      pdfNote.textContent = "Game loaded.";
+      pdfNote.textContent = "Game loaded. Now load the matching PDF.";
     }
   }
 
@@ -409,33 +770,57 @@
     buildNumberPad();
     registerServiceWorker();
 
-    toolNumber.onclick = () => setTool("number");
-    toolDot.onclick = () => setTool("dot");
-    toolCircle.onclick = () => setTool("circle");
-    undoButton.onclick = undo;
-    rollAllButton.onclick = rerollAll;
-    saveGameButton.onclick = saveGameToFile;
+    toolNumber.addEventListener("click", function () {
+      setTool("number");
+    });
+    toolDot.addEventListener("click", function () {
+      setTool("dot");
+    });
+    toolCircle.addEventListener("click", function () {
+      setTool("circle");
+    });
+    undoButton.addEventListener("click", undo);
+    rollAllButton.addEventListener("click", rerollAll);
+    saveGameButton.addEventListener("click", saveGameToFile);
 
-    pdfInput.onchange = async (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const buf = await f.arrayBuffer();
-      await loadPdf(buf, f.name);
-    };
+    pdfInput.addEventListener("change", async function (event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const buffer = await file.arrayBuffer();
+      await loadPdfFromArrayBuffer(buffer, file.name);
+      suppressTapTemporarily();
+    });
 
-    gameInput.onchange = async (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const data = JSON.parse(await f.text());
-      loadGame(data);
-    };
+    gameInput.addEventListener("change", async function (event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const data = JSON.parse(text);
+        loadGameData(data);
+      } catch (e) {
+        pdfNote.textContent = "That save file is not valid JSON.";
+      }
+    });
 
-    closePadButton.onclick = closeNumberPad;
-    numberPadBackdrop.onclick = function (event) {
+    closePadButton.addEventListener("click", closeNumberPad);
+    numberPadBackdrop.addEventListener("click", function (event) {
       if (event.target === numberPadBackdrop) {
         closeNumberPad();
       }
-    };
+    });
+
+    pdfViewport.addEventListener("pointerdown", handleViewportPointerDown, { passive: false });
+    pdfViewport.addEventListener("pointermove", handleViewportPointerMove, { passive: false });
+    pdfViewport.addEventListener("pointerup", handleViewportPointerUp, { passive: false });
+    pdfViewport.addEventListener("pointercancel", handleViewportPointerCancel, { passive: false });
+
+    window.addEventListener("resize", function () {
+      if (pdfDoc) {
+        renderPdf();
+        suppressTapTemporarily();
+      }
+    });
   }
 
   init();
