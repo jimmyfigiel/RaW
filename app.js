@@ -1,6 +1,5 @@
 (function () {
   const STORAGE_KEY = "roll-and-write-pwa-game-state-v1";
-  const TAP_CANCEL_MS = 250;
 
   const diceRow = document.getElementById("diceRow");
   const pdfInput = document.getElementById("pdfInput");
@@ -72,16 +71,6 @@
   let currentPdfName = "";
   let renderToken = 0;
 
-  const view = {
-    scale: 1,
-    offsetX: 0,
-    offsetY: 0,
-    minScale: 1,
-    maxScale: 6,
-    stageWidth: 0,
-    stageHeight: 0
-  };
-
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
@@ -94,16 +83,19 @@
 
   function renderDice() {
     diceRow.innerHTML = "";
-    state.dice.forEach((die) => {
-      const btn = document.createElement("button");
-      btn.className = "die-button";
+
+    state.dice.forEach((die, index) => {
+      const button = document.createElement("button");
+      button.className = "die-button";
+      button.type = "button";
+      button.setAttribute("aria-label", "Reroll die " + (index + 1));
 
       const face = document.createElement("div");
       face.className = "die-face " + die.color;
       face.textContent = die.value;
 
-      btn.appendChild(face);
-      btn.onclick = async () => {
+      button.appendChild(face);
+      button.onclick = async () => {
         for (let i = 0; i < 5; i++) {
           die.value = roll();
           renderDice();
@@ -112,13 +104,15 @@
         saveState();
       };
 
-      diceRow.appendChild(btn);
+      diceRow.appendChild(button);
     });
   }
 
   async function rerollAll() {
     for (let i = 0; i < 5; i++) {
-      state.dice.forEach((d) => (d.value = roll()));
+      state.dice.forEach((d) => {
+        d.value = roll();
+      });
       renderDice();
       await sleep(90);
     }
@@ -131,8 +125,8 @@
     rerenderAnnotationsOnly();
   }
 
-  function setTool(t) {
-    state.tool = t;
+  function setTool(tool) {
+    state.tool = tool;
     saveState();
     renderToolButtons();
   }
@@ -149,8 +143,14 @@
     el.style.left = mark.x * 100 + "%";
     el.style.top = mark.y * 100 + "%";
 
-    if (mark.type === "number") el.textContent = mark.value;
-    if (mark.type === "dot") return el;
+    if (mark.type === "dot") {
+      return el;
+    }
+
+    if (mark.type === "number") {
+      el.textContent = mark.value;
+      return el;
+    }
 
     const ring = document.createElement("div");
     ring.className = "circle-ring";
@@ -178,41 +178,170 @@
     });
   }
 
+  function openNumberPad(point) {
+    pendingPoint = point;
+    numberPadBackdrop.classList.remove("hidden");
+  }
+
+  function closeNumberPad() {
+    pendingPoint = null;
+    numberPadBackdrop.classList.add("hidden");
+  }
+
+  function buildNumberPad() {
+    const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+    numberGrid.innerHTML = "";
+
+    values.forEach((value) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "number-pick";
+      button.textContent = value;
+      button.onclick = () => {
+        if (!pendingPoint) return;
+        addMark({
+          id: makeId(),
+          page: pendingPoint.page,
+          type: "number",
+          x: pendingPoint.x,
+          y: pendingPoint.y,
+          value: value
+        });
+        closeNumberPad();
+      };
+      numberGrid.appendChild(button);
+    });
+  }
+
+  function findNearbyCircle(page, x, y) {
+    for (let i = state.marks.length - 1; i >= 0; i--) {
+      const m = state.marks[i];
+      if (m.page !== page) continue;
+      if (m.type !== "circle" && m.type !== "circlex") continue;
+
+      const dx = m.x - x;
+      const dy = m.y - y;
+      if (Math.sqrt(dx * dx + dy * dy) < 0.04) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function handlePageTap(pageNumber, event) {
+    const shell = event.currentTarget;
+    const rect = shell.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+
+    if (state.tool === "dot") {
+      addMark({
+        id: makeId(),
+        page: pageNumber,
+        type: "dot",
+        x: x,
+        y: y
+      });
+      return;
+    }
+
+    if (state.tool === "number") {
+      openNumberPad({
+        page: pageNumber,
+        x: x,
+        y: y
+      });
+      return;
+    }
+
+    if (state.tool === "circle") {
+      const existing = findNearbyCircle(pageNumber, x, y);
+      if (existing !== -1) {
+        if (state.marks[existing].type === "circle") {
+          state.marks[existing].type = "circlex";
+          saveState();
+          rerenderAnnotationsOnly();
+        }
+      } else {
+        addMark({
+          id: makeId(),
+          page: pageNumber,
+          type: "circle",
+          x: x,
+          y: y
+        });
+      }
+    }
+  }
+
   async function renderPdf() {
     if (!pdfDoc) return;
 
     const token = ++renderToken;
     pdfStage.innerHTML = "";
 
+    if (emptyState) {
+      emptyState.style.display = "none";
+    }
+
+    const loadingCard = document.createElement("div");
+    loadingCard.className = "loading-card";
+    loadingCard.textContent = "Rendering PDF...";
+    pdfStage.appendChild(loadingCard);
+
     for (let p = 1; p <= pdfDoc.numPages; p++) {
       if (token !== renderToken) return;
 
       const page = await pdfDoc.getPage(p);
-      const viewport = page.getViewport({ scale: 1 });
-      const scale = pdfViewport.clientWidth / viewport.width;
+      const rawViewport = page.getViewport({ scale: 1 });
+      const maxWidth = Math.min(900, pdfViewport.clientWidth - 20);
+      const scale = maxWidth / rawViewport.width;
+      const renderViewport = page.getViewport({ scale });
 
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      canvas.width = viewport.width * scale;
-      canvas.height = viewport.height * scale;
-      canvas.style.width = "100%";
+      const pageCard = document.createElement("div");
+      pageCard.className = "page-card";
 
-      await page.render({
-        canvasContext: ctx,
-        viewport: page.getViewport({ scale })
-      }).promise;
+      const meta = document.createElement("div");
+      meta.className = "page-meta";
+      meta.textContent = "Page " + p + " of " + pdfDoc.numPages;
+      pageCard.appendChild(meta);
 
       const shell = document.createElement("div");
       shell.className = "page-shell";
-      shell.dataset.page = p;
+      shell.dataset.page = String(p);
+
+      const canvas = document.createElement("canvas");
+      canvas.className = "page-canvas";
+
+      const ctx = canvas.getContext("2d");
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      canvas.style.width = renderViewport.width + "px";
+      canvas.style.height = renderViewport.height + "px";
+
+      await page.render({
+        canvasContext: ctx,
+        viewport: renderViewport
+      }).promise;
 
       const layer = document.createElement("div");
       layer.className = "annotation-layer";
-      layer.dataset.page = p;
+      layer.dataset.page = String(p);
 
       shell.appendChild(canvas);
       shell.appendChild(layer);
-      pdfStage.appendChild(shell);
+      shell.onclick = function (event) {
+        handlePageTap(p, event);
+      };
+
+      pageCard.appendChild(shell);
+
+      if (token === renderToken) {
+        if (p === 1) {
+          pdfStage.innerHTML = "";
+        }
+        pdfStage.appendChild(pageCard);
+      }
     }
 
     rerenderAnnotationsOnly();
@@ -221,15 +350,20 @@
   async function loadPdf(buffer, name) {
     currentPdfName = name;
     pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
-    renderPdf();
+
+    if (emptyState) {
+      emptyState.style.display = "none";
+    }
+
+    pdfNote.textContent = currentPdfName + " loaded.";
+    await renderPdf();
   }
 
   function saveGameToFile() {
     const blob = new Blob(
       [
         JSON.stringify({
-          state,
-          view,
+          state: state,
           pdfName: currentPdfName
         })
       ],
@@ -243,11 +377,17 @@
   }
 
   function loadGame(data) {
-    state = data.state;
+    state = data.state || createInitialState();
     saveState();
     renderDice();
     renderToolButtons();
     rerenderAnnotationsOnly();
+
+    if (data.pdfName) {
+      pdfNote.textContent = 'Game loaded. Please load PDF "' + data.pdfName + '".';
+    } else {
+      pdfNote.textContent = "Game loaded.";
+    }
   }
 
   function registerServiceWorker() {
@@ -266,6 +406,7 @@
   function init() {
     renderDice();
     renderToolButtons();
+    buildNumberPad();
     registerServiceWorker();
 
     toolNumber.onclick = () => setTool("number");
@@ -279,7 +420,7 @@
       const f = e.target.files[0];
       if (!f) return;
       const buf = await f.arrayBuffer();
-      loadPdf(buf, f.name);
+      await loadPdf(buf, f.name);
     };
 
     gameInput.onchange = async (e) => {
@@ -287,6 +428,13 @@
       if (!f) return;
       const data = JSON.parse(await f.text());
       loadGame(data);
+    };
+
+    closePadButton.onclick = closeNumberPad;
+    numberPadBackdrop.onclick = function (event) {
+      if (event.target === numberPadBackdrop) {
+        closeNumberPad();
+      }
     };
   }
 
