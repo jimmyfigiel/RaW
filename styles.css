@@ -9,6 +9,7 @@
   --mark: #111111;
   --shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
   --shadow-soft: 0 3px 10px rgba(0, 0, 0, 0.10);
+  --control-size: 48px;
 }
 
 * {
@@ -45,7 +46,7 @@ label {
 }
 
 .app-frame {
-  max-width: 960px;
+  max-width: 1100px;
   margin: 0 auto;
   height: 100%;
   display: flex;
@@ -108,14 +109,19 @@ label {
   gap: 8px;
 }
 
-.tool-button {
-  min-height: 48px;
+.tool-button,
+.file-button {
+  min-height: var(--control-size);
   border-radius: 14px;
   border: 1px solid #374151;
   background: white;
   color: var(--text);
   font-weight: 700;
   box-shadow: var(--shadow-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .tool-button.active {
@@ -131,32 +137,19 @@ label {
 .pdf-controls {
   margin-top: 10px;
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 52px 76px 52px;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   align-items: center;
 }
 
-.file-button,
-.zoom-button,
-.zoom-label {
-  min-height: 46px;
-  border-radius: 14px;
-  border: 1px solid #374151;
-  background: white;
-  box-shadow: var(--shadow-soft);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-}
-
-.file-button,
-.zoom-button {
-  cursor: pointer;
-}
-
-#pdfInput {
+#pdfInput,
+#gameInput {
   display: none;
+}
+
+.rotate-text {
+  display: inline-block;
+  line-height: 1;
 }
 
 .bottom-panel {
@@ -170,7 +163,7 @@ label {
 
 .pdf-note {
   flex: 0 0 auto;
-  max-width: 760px;
+  max-width: 900px;
   margin: 0 auto 10px auto;
   color: var(--muted);
   font-size: 0.95rem;
@@ -207,7 +200,7 @@ label {
 }
 
 .empty-card {
-  width: min(100%, 760px);
+  width: min(100%, 900px);
   background: white;
   border-radius: 24px;
   padding: 20px;
@@ -395,9 +388,7 @@ label {
   }
 
   .tool-button,
-  .file-button,
-  .zoom-button,
-  .zoom-label {
+  .file-button {
     min-height: 44px;
     font-size: 0.95rem;
   }
@@ -418,5 +409,48 @@ label {
   .page-card {
     border-radius: 18px;
     padding: 8px;
+  }
+}
+
+@media (orientation: landscape) {
+  .app-frame {
+    flex-direction: row;
+  }
+
+  .top-panel {
+    width: 104px;
+    min-width: 104px;
+    height: 100%;
+    border-bottom: 0;
+    border-right: 1px solid #c7ccd4;
+    padding:
+      calc(env(safe-area-inset-top) + 10px)
+      8px
+      calc(env(safe-area-inset-bottom) + 10px)
+      8px;
+    overflow-y: auto;
+  }
+
+  .dice-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-row,
+  .pdf-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .bottom-panel {
+    padding: 10px 10px 10px 8px;
+  }
+
+  .rotate-text {
+    transform: rotate(-90deg);
+    white-space: nowrap;
+  }
+
+  .tool-button,
+  .file-button {
+    min-height: var(--control-size);
   }
 }
