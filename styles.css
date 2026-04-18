@@ -58,7 +58,7 @@ label {
 
 .top-panel {
   flex: 0 0 auto;
-  background: var(--panel);
+  background: hotpink;
   border-bottom: 1px solid #c7ccd4;
   padding:
     calc(env(safe-area-inset-top) + 10px)
