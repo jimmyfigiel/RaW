@@ -6,6 +6,7 @@
   const pdfInput = document.getElementById("pdfInput");
   const gameInput = document.getElementById("gameInput");
   const saveGameButton = document.getElementById("saveGameButton");
+  const newGameButton = document.getElementById("newGameButton");
   const pdfStage = document.getElementById("pdfStage");
   const pdfViewport = document.getElementById("pdfViewport");
   const pdfNote = document.getElementById("pdfNote");
@@ -719,6 +720,15 @@
     pdfNote.textContent = "Game saved.";
   }
 
+  function newGame() {
+    state.marks = [];
+    saveState();
+    rerenderAnnotationsOnly();
+    pdfNote.textContent = currentPdfName
+      ? "New game started. Marks cleared."
+      : "New game started. Marks cleared. Load a PDF to begin.";
+  }
+
   function loadGameData(data) {
     if (!data || typeof data !== "object") {
       pdfNote.textContent = "That save file could not be read.";
@@ -782,6 +792,9 @@
     undoButton.addEventListener("click", undo);
     rollAllButton.addEventListener("click", rerollAll);
     saveGameButton.addEventListener("click", saveGameToFile);
+    if (newGameButton) {
+      newGameButton.addEventListener("click", newGame);
+    }
 
     pdfInput.addEventListener("change", async function (event) {
       const file = event.target.files && event.target.files[0];
