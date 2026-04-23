@@ -58,7 +58,7 @@ label {
 
 .top-panel {
   flex: 0 0 auto;
-  background: blue;
+  background: var(--panel);
   border-bottom: 1px solid #c7ccd4;
   padding:
     calc(env(safe-area-inset-top) + 10px)
@@ -141,7 +141,7 @@ label {
 .pdf-controls {
   margin-top: 10px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   align-items: center;
 }
@@ -252,6 +252,7 @@ label {
   height: auto;
   background: white;
   user-select: none;
+  -webkit-user-select: none;
   pointer-events: none;
 }
 
@@ -259,11 +260,17 @@ label {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .mark {
   position: absolute;
   transform: translate(-50%, -50%);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  pointer-events: none;
 }
 
 .mark.dot {
@@ -278,6 +285,9 @@ label {
   font-weight: 700;
   font-size: 0.725rem;
   line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .mark.circle,
