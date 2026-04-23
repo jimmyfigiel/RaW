@@ -1,6 +1,6 @@
 :root {
   --bg: #f3f4f6;
-  --panel: #e5e7eb;
+  --panel: blue;
   --line: #111827;
   --line-soft: #d1d5db;
   --text: #111827;
@@ -58,7 +58,7 @@ label {
 
 .top-panel {
   flex: 0 0 auto;
-  background: blue;
+  background: var(--panel);
   border-bottom: 1px solid #c7ccd4;
   padding:
     calc(env(safe-area-inset-top) + 10px)
