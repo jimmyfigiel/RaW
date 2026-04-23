@@ -1,12 +1,12 @@
 {
   "name": "Roll and Write PWA",
   "short_name": "RollWrite",
-  "description": "Dice and annotation prototype for roll-and-write games",
+  "description": "Dice and PDF annotation tool for roll-and-write games.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f3f3f3",
-  "theme_color": "#f3f3f3",
+  "background_color": "#f3f4f6",
+  "theme_color": "#e5e7eb",
   "icons": [
     {
       "src": "icon-192.png",
